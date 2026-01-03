@@ -1,0 +1,23 @@
+:root {
+    --primary: #344F1F;
+    --accent: #F4991A;
+    --accent-hover: #d8820d;
+    --bg: #F9F5F0;
+    --card: #ffffff;
+    --text-dark: #333333;
+    --danger: red;
+    --text-light: #e3e3e3;
+    --shadow: 0 0px 15px rgba(0, 0, 0, 0.2);
+    --radius: 12px;
+    --transition: all 0.3s ease;
+    --border-radius: 12px;
+}
+
+* { box-sizing: border-box; font-family: "Noto Sans TC", sans-serif; }
+
+body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg);
+    color: var(--text-dark);
+}

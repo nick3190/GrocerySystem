@@ -1,0 +1,168 @@
+/* 頁面滿版容器 */
+.page-wrapper {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;  /* 垂直置中 */
+  justify-content: center; /* 水平置中 */
+  background-color: var(--bg);
+  padding: 20px;
+}
+
+/* 登入卡片主體 */
+.centered-box{
+  background: var(--card-bg);
+  width: 100%;
+  max-width: 420px; /* 限制最大寬度，避免電腦版太寬 */
+  padding: 30px 25px;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05); /* 柔和陰影 */
+  text-align: center;
+}
+
+.centered-box h2 {
+  margin-bottom: 20px;
+  color: var(--primary);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+/* --- 標籤切換區塊 (Tabs) --- */
+.tabs {
+  display: flex;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 25px;
+}
+
+.tabs button {
+  flex: 1; /* 兩個按鈕均分寬度 */
+  background: none;
+  border-radius: 12px 12px 0 0;
+  border: none;
+  padding: 12px 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+/* 標籤 - 懸停效果 */
+.tabs button:hover {
+  color: var(--primary);
+  background-color: #fafafa;
+}
+
+/* 標籤 - 啟用狀態 (Active) */
+.tabs button.active {
+  color: white;
+  background-color: var(--accent);
+  font-weight: bold;
+}
+
+/* 啟用狀態下的底部滑動條效果 */
+.tabs button.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px; /* 蓋住原本的邊框 */
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--accent);
+}
+
+/* --- 表單內容區 --- */
+.form-content {
+  display: flex;
+  flex-direction: column;
+  gap: 15px; /* 輸入框之間的間距 */
+}
+
+/* 輸入框樣式 */
+.main-input {
+  width: 100%;
+  padding: 12px 15px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: #fff;
+  transition: border 0.2s, box-shadow 0.2s;
+  box-sizing: border-box; /* 確保 padding 不會撐大寬度 */
+}
+
+.main-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(230, 126, 34, 0.1);
+}
+
+/* 提示文字 */
+.form-content p {
+  color: var(--text-sub);
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+
+/* --- 按鈕樣式 --- */
+.action-btn {
+  width: 100%;
+  padding: 14px;
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-top: 10px;
+}
+
+.action-btn:hover {
+  background-color: #34495e;
+}
+
+.action-btn:disabled {
+  background-color: #bdc3c7;
+  cursor: not-allowed;
+}
+
+/* 次要按鈕 (返回修改) */
+.secondary-btn {
+  background: transparent;
+  color: var(--text-sub);
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-top: 10px;
+}
+
+.secondary-btn:hover {
+  background-color: #f0f0f0;
+  color: var(--text-dark);
+}
+
+/* 按鈕群組 (步驟2時並排顯示) */
+.btn-group {
+  display: grid;
+  grid-template-columns: 1fr 2fr; /* 左邊按鈕小，右邊按鈕大 */
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* --- 手機版優化 --- */
+@media (max-width: 480px) {
+  .centered-box.login-box {
+    padding: 20px 15px;
+    box-shadow: none; /* 手機版可以去掉陰影，更簡潔 */
+    background: transparent; /* 或者保持卡片式，看喜好 */
+  }
+  
+  .page-wrapper {
+    background-color: #fff; /* 手機版背景全白 */
+    padding: 0;
+  }
+}

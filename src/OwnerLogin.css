@@ -1,0 +1,313 @@
+/* 基礎 Layout */
+.admin-container {
+    display: flex;
+    min-height: 100vh;
+    background: #f4f7f6;
+}
+
+/* 側邊導覽列 (預設電腦版) */
+.admin-sidebar {
+    width: 260px;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    z-index: 1000;
+    transition: 0.3s ease;
+}
+
+.sidebar-brand {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 40px;
+}
+
+.nav-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+}
+
+.nav-menu button {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 15px;
+    text-align: left;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: 0.2s;
+}
+
+.nav-menu button.active {
+    background: var(--accent);
+    color: white;
+    font-weight: bold;
+}
+
+.logout-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 10px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+/* 主內容區 */
+.admin-content {
+    flex: 1;
+    padding: 30px;
+    overflow-x: hidden;
+}
+
+.content-header {
+    margin-bottom: 30px;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 10px;
+}
+
+/* 數據卡片 */
+.stat-hero {
+    background: white;
+    padding: 40px;
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    text-align: center;
+    margin-bottom: 20px;
+    border-top: 5px solid var(--accent);
+}
+
+.stat-hero h1 {
+    font-size: 48px;
+    color: var(--primary);
+    margin: 10px 0;
+}
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.stat-card {
+    background: white;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: var(--shadow);
+}
+
+/* 表格樣式 */
+.table-container {
+    background: white;
+    border-radius: 15px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+    padding: 15px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+.text-price {
+    color: #e53935;
+    font-weight: bold;
+}
+
+.btn-detail {
+    background: #eee;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    margin-right: 5px;
+}
+
+.btn-delete {
+    background: #ffebee;
+    color: #c62828;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+}
+
+/* 手機版適配 (Responsive) */
+.mobile-header {
+    display: none;
+}
+
+.close-sidebar {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .admin-container {
+        flex-direction: column;
+    }
+
+    .mobile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--primary);
+        color: white;
+        padding: 15px;
+    }
+
+    .menu-toggle {
+        background: none;
+        border: none;
+        color: white;
+        font-size: 24px;
+    }
+
+    .admin-sidebar {
+        position: fixed;
+        left: -260px;
+        z-index: 2000;
+    }
+
+    .admin-sidebar.open {
+        left: 0;
+    }
+
+    .close-sidebar {
+        display: block;
+        background: none;
+        border: none;
+        color: white;
+        font-size: 30px;
+    }
+
+    .sidebar-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1500;
+    }
+
+    .admin-content {
+        padding: 15px;
+    }
+}
+
+/* 登入頁面樣式 */
+.admin-login-wrapper {
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: var(--bg);
+}
+
+.login-card {
+    background: white;
+    padding: 40px;
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    width: 90%;
+    max-width: 400px;
+}
+
+.login-card h2 {
+    text-align: center;
+    color: var(--primary);
+    margin-bottom: 30px;
+}
+
+.input-group {
+    margin-bottom: 15px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 5px;
+    color: #666;
+}
+
+.input-group input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.login-btn {
+    width: 100%;
+    padding: 15px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    margin-top: 10px;
+}
+
+.change-btn {
+    width: 100%;
+    padding: 15px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    margin-top: 10px;
+}
+
+
+/* 響應式商品網格 */
+.product-grid {
+    display: grid;
+    gap: 15px;
+    padding: 15px;
+    grid-template-columns: repeat(2, 1fr);
+    /* 手機版預設  2 欄 */
+}
+
+@media (min-width: 768px) {
+    .product-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    .filter-section {
+        flex-direction: row;
+    }
+}
+
+@media (min-width: 1200px) {
+    .product-grid {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+
+.product-card {
+    background: var(--white);
+    border-radius: var(--border-radius);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: var(--transition);
+    border: 1px solid #eee;
+    box-shadow: 0 0px 5px rgba(0, 0, 0, 0.5);
+}
+
+.product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow);
+}

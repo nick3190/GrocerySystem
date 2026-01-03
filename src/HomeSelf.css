@@ -1,0 +1,40 @@
+/* 適用於進入流程所有 CSS */
+.page-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100vw;
+    height: 100vh;
+    background: var(--bg);
+}
+
+.centered-box {
+    width: 90%;
+    max-width: 420px;
+    background: var(--card);
+    padding: 40px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column; /* 確保內容垂直排列 */
+    gap: 20px;
+    text-align: center;
+}
+
+.centered-box h2 {
+    color: var(--primary);
+    margin: 0 0 10px 0;
+    white-space: nowrap; /* 防止標題跳行 */
+}
+
+.centered-box button {
+    width: 100%;
+    padding: 15px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.2s;
+}

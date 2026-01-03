@@ -1,0 +1,78 @@
+.shopcart-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cart-list {
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.cart-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  background: white;
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  border-left: 5px solid var(--accent);
+}
+
+.cart-footer {
+  position: sticky;
+  bottom: 20px;
+  background: white;
+  padding: 20px;
+  border-radius: 15px;
+  box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 30px;
+}
+
+.add-btn {
+  background: var(--accent);
+  color: white;
+  padding: 12px 30px;
+  border-radius: 8px;
+  font-size: 18px;
+  border: none;
+  font-weight: bold;
+}
+
+.checkout-btn {
+  background: var(--primary);
+  color: white;
+  padding: 12px 30px;
+  border-radius: 8px;
+  font-size: 18px;
+  border: none;
+  font-weight: bold;
+}
+
+.delete-btn {
+  background: var(--danger);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 100%;
+  font-size: 1.5em;
+  cursor: pointer;
+}
+
+.qty-control {
+  width: auto;
+  padding: 0px;
+  align-items: center;
+}
+
+.qty-control button {
+  width: 45%;
+}
