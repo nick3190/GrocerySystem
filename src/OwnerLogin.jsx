@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import axios from "axios";
+import api from "./api";
 import "./OwnerLogin.css";
 import "./ProductList.css"; 
 import moment from 'moment';
@@ -45,11 +45,11 @@ function Owner() {
     const fetchData = async () => {
         try {
             const [ordRes, prodRes, catRes, brandRes, userRes] = await Promise.all([
-                axios.get("/history"),
-                axios.get("/products"),
-                axios.get("/api/categories"),
-                axios.get("/api/brands"),
-                axios.get("/api/users")
+                api.get("/history"),
+                api.get("/products"),
+                api.get("/api/categories"),
+                api.get("/api/brands"),
+                api.get("/api/users")
             ]);
             setOrders(ordRes.data || []);
             setRawProducts(prodRes.data || []);
@@ -140,7 +140,8 @@ function Owner() {
 
     // --- 功能：列印訂單 ---
     const printOrder = async (id) => {
-        window.open(`/api/orders/${id}/print`, '_blank');
+        const baseUrl = api.defaults.baseURL || 'http://localhost:4000';
+        window.open(`${baseUrl}/api/orders/${id}/print`, '_blank');
         setOrders(prev => prev.map(o => o.id === id ? { ...o, isPrinted: true } : o));
     };
 
@@ -155,7 +156,7 @@ function Owner() {
     const saveProductChanges = async () => {
         if (!editingVariant) return;
         try {
-            await axios.put(`/products/${editingVariant.id}`, editingVariant);
+            await api.put(`/products/${editingVariant.id}`, editingVariant);
             alert("修改成功");
             
             // 更新本地資料

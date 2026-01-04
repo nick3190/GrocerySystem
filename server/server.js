@@ -433,7 +433,6 @@ app.get("/history", async (req, res) => {
 // 2. 取得使用者列表 (給 Admin)
 app.get("/api/users", async (req, res) => {
     try {
-        // 同時抓出該使用者的訂單數與總消費金額
         const sql = `
             SELECT u.*, 
                    COUNT(o.order_id) as order_count,
@@ -441,7 +440,7 @@ app.get("/api/users", async (req, res) => {
             FROM users u
             LEFT JOIN orders o ON u.uuid = o.user_uuid
             GROUP BY u.uuid
-            ORDER BY u.id DESC
+            ORDER BY order_count DESC  -- 改成依訂單數排序
         `;
         const result = await pool.query(sql);
         res.json(result.rows);
