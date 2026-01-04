@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from "express";
 import cors from "cors";
 import crypto from 'crypto';
@@ -5,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import pool from './db.js'; // 確保 db.js 已設定好
 import ExcelJS from 'exceljs'; // 新增
 import moment from 'moment';   // 新增
+import twilio from 'twilio';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -17,15 +19,26 @@ const distPath = path.join(__dirname, "../dist");
 
 app.use(express.static(path.join(distPath)));
 
+let twilioClient;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    twilioClient = new twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+} else {
+    console.warn("⚠️ 未偵測到 Twilio 環境變數，簡訊功能可能無法使用");
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
 const requireAuth = (req, res, next) => {
     const user = verifyToken(req);
 
-    // ⭐ 本機：允許「假登入」測試
+    // ⭐ 本機開發方便測試用
     if (!isProduction && !user) {
+        console.log("⚠️ 開發模式：使用模擬使用者身份");
         req.user = {
             uuid: "DEV-UUID",
-            priceTier: "A"
+            priceTier: "A",
+            // 建議補上這兩行，避免某些 API 因為讀不到欄位報錯
+            store_name: "開發測試店",
+            phone: "0900000000"
         };
         return next();
     }
@@ -40,7 +53,7 @@ const requireAuth = (req, res, next) => {
 // Middleware
 app.use(cors({
     origin: isProduction
-        ? ["https://grocerysystem-s04n.onrender.com/"] // 上線後的網址
+        ? ["https://grocerysystem-s04n.onrender.com"] // 上線後的網址
         : ["http://localhost:5173", "http://127.0.0.1:5173"], // 本地開發網址
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true // 允許攜帶 Cookie
@@ -69,23 +82,50 @@ const verifyToken = (req) => {
 
 // 發送驗證碼
 app.post("/api/send-otp", async (req, res) => {
-    const { phone } = req.body;
+    // 前端傳來的 phone，Twilio 需要 E.164 格式 (+8869xxxxxxxx)
+    // 這裡做個簡單處理：如果輸入 09 開頭，轉成 +8869...
+    let { phone } = req.body;
+
     if (!phone) return res.status(400).json({ message: "請輸入手機號碼" });
+
+    // 格式化台灣手機號碼 (將 09xx 轉為 +8869xx)
+    if (phone.startsWith('09')) {
+        phone = '+886' + phone.substring(1);
+    }
 
     // 產生 4 位數驗證碼
     const code = Math.floor(1000 + Math.random() * 9000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5分鐘後過期
 
     try {
+        // 先存入資料庫
         await pool.query(
             `INSERT INTO otps (phone, code, expires_at) VALUES ($1, $2, $3)
              ON CONFLICT (phone) DO UPDATE SET code = $2, expires_at = $3`,
             [phone, code, expiresAt]
         );
-        console.log(`=== 【簡訊模擬】 手機: ${phone}, 驗證碼: ${code} ===`);
-        res.json({ message: "驗證碼已發送" });
+
+        // 3. 修改：判斷並發送簡訊
+        if (twilioClient && process.env.TWILIO_PHONE_NUMBER) {
+            await twilioClient.messages.create({
+                body: `【元榮批發】您的驗證碼是：${code}，請於 5 分鐘內輸入。`,
+                from: process.env.TWILIO_PHONE_NUMBER,
+                to: phone
+            });
+            console.log(`✅ Twilio 簡訊已發送至 ${phone}`);
+            res.json({ message: "驗證碼已發送" });
+        } else {
+            // 如果沒有設定 Twilio (例如本地開發)，還是印在 Console
+            console.log(`=== 【開發模式/未設定Twilio】 手機: ${phone}, 驗證碼: ${code} ===`);
+            res.json({ message: "驗證碼已發送 (開發模式: 請看 Console)" });
+        }
+
     } catch (err) {
-        console.error(err);
+        console.error("簡訊發送錯誤:", err);
+        // 如果是 Twilio 錯誤 (例如號碼未驗證)，回傳具體一點的訊息方便除錯
+        if (err.code) {
+            return res.status(500).json({ message: `簡訊發送失敗: ${err.message}` });
+        }
         res.status(500).json({ message: "系統錯誤" });
     }
 });
@@ -94,8 +134,13 @@ app.post("/api/send-otp", async (req, res) => {
 app.post("/api/verify-otp", async (req, res) => {
     const { phone, otp, storeName, deliveryType, address, pickupDate, pickupTime } = req.body;
 
+    let formattedPhone = phone;
+    if (formattedPhone.startsWith('09')) {
+        formattedPhone = '+886' + formattedPhone.substring(1);
+    }
+
     try {
-        const otpResult = await pool.query('SELECT * FROM otps WHERE phone = $1', [phone]);
+        const otpResult = await pool.query('SELECT * FROM otps WHERE phone = $1', [formattedPhone]);
         if (otpResult.rows.length === 0) return res.status(400).json({ message: "驗證碼無效" });
 
         const record = otpResult.rows[0];
