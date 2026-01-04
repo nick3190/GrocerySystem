@@ -414,13 +414,14 @@ app.get("/history", async (req, res) => {
             id: row.order_id,
             時間: moment(row.created_at).format('YYYY-MM-DD HH:mm'),
             rawTime: row.created_at,
-            pickupDate: row.pickup_date, // 這裡會是 YYYY-MM-DD
+            pickupDate: row.pickup_date,
             pickupTime: row.pickup_time,
+            // ⭐ 新增: 回傳 pickup_type 讓前端篩選
+            pickupType: row.pickup_type, 
             storeName: row.receiver_name,
             total: row.total_amount,
             products: row.items,
             isPrinted: row.is_printed || false,
-            // 補上使用者資訊以便關聯
             user_uuid: row.user_uuid 
         }));
         res.json(formatted);
@@ -533,6 +534,29 @@ app.get("/api/my-history", requireAuth, async (req, res) => {
         console.error("讀取個人訂單失敗:", err);
         res.status(500).json([]);
     }
+});
+
+app.post("/api/admin/login", (req, res) => {
+    const { username, password } = req.body;
+
+    // 簡單的比對環境變數中的帳密
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+        const payload = { role: 'admin', username: 'admin' };
+        const dataBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
+        const signature = crypto.createHmac('sha256', SECRET_KEY).update(dataBase64).digest('hex');
+        const token = `${dataBase64}.${signature}`;
+
+        res.cookie("auth_token", token, {
+            httpOnly: true,
+            maxAge: 86400000,
+            path: "/",
+            secure: isProduction,
+            sameSite: isProduction ? "None" : "Lax"
+        });
+        return res.json({ message: "管理員登入成功", success: true });
+    }
+    
+    return res.status(401).json({ message: "帳號或密碼錯誤", success: false });
 });
 
 
