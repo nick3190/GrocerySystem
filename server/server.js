@@ -7,7 +7,7 @@ import ExcelJS from 'exceljs'; // 新增
 import moment from 'moment';   // 新增
 
 const app = express();
-const PORT = 4000;
+const PORT = process.env.PORT || 4000;
 const SECRET_KEY = "YOUR_SECRET_KEY_FOR_JWT"; // 請務必更換為安全密鑰
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -33,7 +33,7 @@ const requireAuth = (req, res, next) => {
 // Middleware
 app.use(cors({
     origin: isProduction
-        ? ["https://your-shop-domain.com"] // 上線後的網址
+        ? ["https://grocerysystem-s04n.onrender.com/"] // 上線後的網址
         : ["http://localhost:5173", "http://127.0.0.1:5173"], // 本地開發網址
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true // 允許攜帶 Cookie
