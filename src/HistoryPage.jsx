@@ -9,7 +9,7 @@ function HistoryPage() {
 
     const fetchHistoryList = async () => {
         try {
-            const response = await axios.get('http://localhost:4000/history'); // 假設您的 API 路徑
+            const response = await axios.get('/history'); // 假設您的 API 路徑
             setList(response.data);
         } catch (err) {
             console.error("讀取訂單失敗:", err);
@@ -40,7 +40,7 @@ function HistoryPage() {
             // 由於 json-server 通常不支援一次 POST 陣列，這裡使用 Promise.all 逐筆加入
             // 如果您的後端支援批次加入 (Batch Insert)，請改成一次 API 呼叫
             const promises = products.map(product => {
-                return axios.post('http://localhost:4000/cart', {
+                return axios.post('/cart', {
                     ...product,
                     quantity: product['商品數量'] || 1 // 確保有數量
                 });
