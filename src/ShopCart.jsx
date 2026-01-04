@@ -58,7 +58,7 @@ function ShopCart() {
     };
 
     return (
-        <div className="shop-cart">
+        <div className="shopcart-page">
             <h2>我的購物車</h2>
             
             {/* 訂單資訊概覽 */}
