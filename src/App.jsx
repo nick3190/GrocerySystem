@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import Preview from './Preview';
 import HomeSelf from './HomeSelf';
 import HomeDelievery from './HomeDelievery';
@@ -16,7 +17,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<navigate to="/loginEntry" />} />
+        <Route path="/" element={<Navigate to="/loginEntry" />} />
         <Route path="/loginEntry" element={<LoginEntry />} />
         <Route path="/homeSelf" element={<HomeSelf />} />
         <Route path="/homeDelivery" element={<HomeDelievery />} />
