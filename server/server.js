@@ -449,7 +449,7 @@ app.delete("/history/:id", async (req, res) => { /* ...略... */
 });
 
 
-app.get('*', (req, res) => {
+app.get('/*', (req, res) => {
     if (!req.path.startsWith('/api')) {
         res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     }
