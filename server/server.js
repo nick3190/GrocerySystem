@@ -283,24 +283,22 @@ app.get("/api/brands", async (req, res) => {
 app.get("/cart", requireAuth, async (req, res) => {
     const user = req.user;
     try {
-        // 確保 user 物件存在，避免 undefined 錯誤
         if (!user || !user.uuid) {
             console.error("❌ 購物車錯誤: User UUID 遺失");
             return res.status(401).json({ message: "使用者未授權" });
         }
 
-        // 根據等級決定價格
         const tier = user.priceTier || user.price_tier || 'A';
         const priceColumn = tier === 'B' ? 'price_B' : 'price_A';
 
-        // ⭐ 修正 SQL：移除 CAST，確保是直接 ID 對應
-        // 如果您的 products.id 是數字，cart_items.product_id 也應該是數字
+        // ⭐ 修正重點：加入 CAST(c.product_id AS INTEGER)
+        // 這會將 cart_items 的文字型態 ID 轉為數字，才能跟 products 的數字 ID 比對
         const sql = `
             SELECT c.id, c.product_id, c.quantity, c.note, 
                    p.name, p.spec, p.unit, p.brand,
                    p.${priceColumn} as price
             FROM cart_items c
-            JOIN products p ON c.product_id = p.id
+            JOIN products p ON CAST(c.product_id AS INTEGER) = p.id
             WHERE c.user_uuid = $1
             ORDER BY c.created_at DESC
         `;
@@ -309,10 +307,8 @@ app.get("/cart", requireAuth, async (req, res) => {
         res.json(result.rows);
 
     } catch (err) {
-        // ⭐ 關鍵：將錯誤印在後端 Console，這樣 Render Logs 才看得到
         console.error("❌ 讀取購物車失敗 (GET /cart):", err.message);
-        console.error("詳細錯誤:", err);
-        
+        // 如果還有其他 SQL 錯誤，這裡會印出詳細內容
         res.status(500).json({ message: "伺服器內部錯誤", error: err.message });
     }
 });
