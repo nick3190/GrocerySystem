@@ -282,28 +282,39 @@ app.get("/api/brands", async (req, res) => {
 // --- 3. 購物車 API (需驗證) ---
 app.get("/cart", requireAuth, async (req, res) => {
     const user = req.user;
-    //const user = verifyToken(req);
-    //if (!user) return res.status(401).json({ message: "請先登入" });
     try {
+        // 確保 user 物件存在，避免 undefined 錯誤
+        if (!user || !user.uuid) {
+            console.error("❌ 購物車錯誤: User UUID 遺失");
+            return res.status(401).json({ message: "使用者未授權" });
+        }
+
         // 根據等級決定價格
-        // 注意：這裡假設 user 物件有 price_tier。若無，預設 A
         const tier = user.priceTier || user.price_tier || 'A';
         const priceColumn = tier === 'B' ? 'price_B' : 'price_A';
 
+        // ⭐ 修正 SQL：移除 CAST，確保是直接 ID 對應
+        // 如果您的 products.id 是數字，cart_items.product_id 也應該是數字
         const sql = `
             SELECT c.id, c.product_id, c.quantity, c.note, 
-                   p.name, p.spec, p.unit, p.flavor, p.brand,
+                   p.name, p.spec, p.unit, p.brand,
                    p.${priceColumn} as price
             FROM cart_items c
-            JOIN products p ON c.product_id = CAST(p.id AS VARCHAR)
+            JOIN products p ON c.product_id = p.id
             WHERE c.user_uuid = $1
             ORDER BY c.created_at DESC
         `;
+
         const result = await pool.query(sql, [user.uuid]);
         res.json(result.rows);
-    } catch (err) { 
-        console.error("讀取購物車失敗:", err);
-        res.status(500).json([]); }
+
+    } catch (err) {
+        // ⭐ 關鍵：將錯誤印在後端 Console，這樣 Render Logs 才看得到
+        console.error("❌ 讀取購物車失敗 (GET /cart):", err.message);
+        console.error("詳細錯誤:", err);
+        
+        res.status(500).json({ message: "伺服器內部錯誤", error: err.message });
+    }
 });
 
 app.post("/cart", requireAuth, async (req, res) => {
