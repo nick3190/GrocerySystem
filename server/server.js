@@ -8,14 +8,14 @@ import moment from 'moment';   // 新增
 
 import path from 'path';
 import { fileURLToPath } from 'url';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// 其他 api 路由都設定完後：
-app.use(express.static(path.join(__dirname, 'dist'))); // 指向你的 React build 資料夾
-
 const app = express();
 const PORT = process.env.PORT || 4000;
 const SECRET_KEY = "YOUR_SECRET_KEY_FOR_JWT"; // 請務必更換為安全密鑰
+
+// 其他 api 路由都設定完後：
+app.use(express.static(path.join(__dirname, 'dist'))); // 指向你的 React build 資料夾
 
 const isProduction = process.env.NODE_ENV === 'production';
 const requireAuth = (req, res, next) => {
