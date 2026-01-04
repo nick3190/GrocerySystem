@@ -6,7 +6,7 @@ import axios from 'axios';
     ? 'https://grocerysystem-s04n.onrender.com' // 線上後端網址
     : 'http://localhost:4000';           // 本地後端網址*/
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:10000';
 
 const api = axios.create({
     baseURL: BASE_URL,
