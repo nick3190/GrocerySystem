@@ -301,7 +301,9 @@ app.get("/cart", requireAuth, async (req, res) => {
         `;
         const result = await pool.query(sql, [user.uuid]);
         res.json(result.rows);
-    } catch (err) { res.status(500).json([]); }
+    } catch (err) { 
+        console.error("讀取購物車失敗:", err);
+        res.status(500).json([]); }
 });
 
 app.post("/cart", requireAuth, async (req, res) => {

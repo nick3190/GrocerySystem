@@ -37,10 +37,10 @@ function Owner() {
     const fetchData = async () => {
         try {
             const [ordRes, prodRes, catRes, brandRes] = await Promise.all([
-                axios.get("http://localhost:4000/history"),
-                axios.get("http://localhost:4000/products"),
-                axios.get("http://localhost:4000/api/categories"),
-                axios.get("http://localhost:4000/api/brands")
+                axios.get("/history"),
+                axios.get("/products"),
+                axios.get("/api/categories"),
+                axios.get("/api/brands")
             ]);
             setOrders(ordRes.data || []);
             setRawProducts(prodRes.data || []);
