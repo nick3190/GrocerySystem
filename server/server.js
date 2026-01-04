@@ -6,6 +6,13 @@ import pool from './db.js'; // 確保 db.js 已設定好
 import ExcelJS from 'exceljs'; // 新增
 import moment from 'moment';   // 新增
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// 其他 api 路由都設定完後：
+app.use(express.static(path.join(__dirname, 'dist'))); // 指向你的 React build 資料夾
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 const SECRET_KEY = "YOUR_SECRET_KEY_FOR_JWT"; // 請務必更換為安全密鑰
@@ -141,7 +148,7 @@ app.post("/api/verify-otp", async (req, res) => {
             maxAge: 86400000,
             path: "/",
             secure: isProduction ? true : false,          // localhost 必須 false
-            sameSite: isProduction ? "None" : "None"      // <-- 改成 None（不是 Lax）
+            sameSite: isProduction ? "None" : "Lax"      // <-- 改成 None（不是 Lax）
         });
 
         console.log("Cookie 設定完成，Token:", token.substring(0, 10) + "...");
@@ -293,8 +300,8 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
     try {
         // 1. 抓取完整使用者資料 (包含地址、時段等)
-        const userRes = await pool.query("SELECT * FROM users WHERE uuid = $1", [userToken.uuid]);
-        const user = userRes.rows[0];
+        const userRes = await pool.query("SELECT * FROM users WHERE uuid = $1", [user.uuid]);
+        const dbUser = userRes.rows[0];
 
         // 2. 抓取購物車內容
         const cartRes = await pool.query(`
@@ -439,6 +446,13 @@ app.delete("/history/:id", async (req, res) => { /* ...略... */
         await pool.query('DELETE FROM orders WHERE id = $1', [req.params.id]);
         res.json({ message: "已刪除" });
     } catch (err) { res.status(500).json({ message: "刪除失敗" }); }
+});
+
+
+app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    }
 });
 
 app.listen(PORT, () => {
