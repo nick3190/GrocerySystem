@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 4000;
 const SECRET_KEY = "YOUR_SECRET_KEY_FOR_JWT"; // 請務必更換為安全密鑰
 const distPath = path.join(__dirname, "../dist");
 
-app.use(express.static(path.join(distPath, "dist")));
+app.use(express.static(path.join(distPath)));
 
 const isProduction = process.env.NODE_ENV === 'production';
 const requireAuth = (req, res, next) => {
@@ -452,7 +452,7 @@ app.delete("/history/:id", async (req, res) => { /* ...略... */
 // 其他 api 路由都設定完後：
 app.use((req, res, next) => {
     if (req.path.startsWith("/api")) return next();
-    res.sendFile(path.join(distPath, "dist", "index.html"));
+    res.sendFile(path.join(distPath, "index.html"));
 });
 
 
