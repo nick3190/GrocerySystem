@@ -13,10 +13,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
 const SECRET_KEY = "YOUR_SECRET_KEY_FOR_JWT"; // 請務必更換為安全密鑰
+const distPath = path.join(__dirname, "../dist");
 
-const projectRoot = path.resolve(__dirname, "../../"); // 從 server.js 回到專案根目錄
-
-app.use(express.static(path.join(projectRoot, "dist")));
+app.use(express.static(path.join(distPath, "dist")));
 
 const isProduction = process.env.NODE_ENV === 'production';
 const requireAuth = (req, res, next) => {
@@ -453,7 +452,7 @@ app.delete("/history/:id", async (req, res) => { /* ...略... */
 // 其他 api 路由都設定完後：
 app.use((req, res, next) => {
     if (req.path.startsWith("/api")) return next();
-    res.sendFile(path.join(projectRoot, "dist", "index.html"));
+    res.sendFile(path.join(distPath, "dist", "index.html"));
 });
 
 
