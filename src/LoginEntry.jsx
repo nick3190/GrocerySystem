@@ -40,7 +40,7 @@ function LoginEntry() {
 
         setIsLoading(true);
         try {
-            await api.post('http://localhost:4000/api/send-otp', { phone: formData.phone });
+            await api.post('/api/send-otp', { phone: formData.phone });
             alert("驗證碼已發送");
             setStep(2);
         } catch (error) {

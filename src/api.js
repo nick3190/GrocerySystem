@@ -3,7 +3,7 @@ import axios from 'axios';
 
 // 判斷後端網址 (本地開發 vs 線上環境)
 /*const BASE_URL = import.meta.env.MODE === 'production'
-    ? 'https://api.your-shop-domain.com' // 線上後端網址
+    ? 'https://grocerysystem-s04n.onrender.com' // 線上後端網址
     : 'http://localhost:4000';           // 本地後端網址*/
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
