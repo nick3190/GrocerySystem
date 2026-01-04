@@ -73,6 +73,14 @@ const formatPhone = (rawPhone) => {
     if (p.startsWith('8869')) return '+' + p;
     return p;
 };
+// --- 工具函式：產生訂單編號 (格式：YYYYMMDDHHmm + 3位亂數) ---
+const generateOrderId = () => {
+    const now = new Date();
+    // 轉成台北時間字串 (簡單做法)
+    const dateStr = now.toISOString().replace(/[-T:.Z]/g, "").slice(0, 12); // 取到分
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `${dateStr}${random}`;
+};
 
 // --- Helper: JWT/Cookie 驗證 ---
 const verifyToken = (req) => {
@@ -352,17 +360,13 @@ app.delete("/cart/:id", requireAuth, async (req, res) => {
 
 app.post("/api/checkout", requireAuth, async (req, res) => {
     const user = req.user;
-    //const userToken = verifyToken(req);
-    //if (!userToken) return res.status(401).json({ message: "請先登入" });
-
     const { orderNote } = req.body;
 
     try {
-        // 1. 抓取完整使用者資料 (包含地址、時段等)
+        // 1. 抓取完整使用者資料
         const userRes = await pool.query("SELECT * FROM users WHERE uuid = $1", [user.uuid]);
-        const dbUser = userRes.rows[0];
-
-        // 2. 抓取購物車內容
+        
+        // 2. 抓取購物車內容 (計算總金額)
         const cartRes = await pool.query(`
             SELECT c.*, p.name, p."price_A", p."price_B" 
             FROM cart_items c 
@@ -371,16 +375,14 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "購物車是空的" });
 
-        // 3. 計算總金額
         const isB = user.price_tier === 'B';
         const total = cartRes.rows.reduce((sum, item) => {
-            // 注意：Postgres 回傳的 key 會跟 SQL 欄位名一致
-            // 如果我們用 "price_A"，回傳物件屬性就是 item.price_A
             const price = isB ? item.price_B : item.price_A;
             return sum + (Number(price) * item.quantity);
         }, 0);
 
-        const productDetails = cartRes.rows.map(item => ({
+        // 整理商品明細 JSON
+        const itemsJson = cartRes.rows.map(item => ({
             id: item.product_id,
             name: item.name,
             qty: item.quantity,
@@ -388,72 +390,84 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
             price: isB ? item.price_B : item.price_A
         }));
 
-        // 4. 寫入 orders (history) 表
-        // 請確保您的 orders 表結構符合 INSERT
+        // ⭐ 產生訂單編號 (因為資料庫 order_id 不是 serial)
+        const newOrderId = generateOrderId();
+
+        // ⭐ 寫入 orders (適配新 Schema)
+        // 欄位對應：products -> items, "總金額" -> total_amount
         const insertSql = `
             INSERT INTO orders 
-            (user_uuid, receiver_name, receiver_phone, address, 
+            (order_id, user_uuid, receiver_name, receiver_phone, address, 
              pickup_type, pickup_date, pickup_time, 
-             products, "總金額", order_note, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+             items, total_amount, order_note, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
         `;
 
         await pool.query(insertSql, [
-            user.uuid, user.store_name, user.phone, user.address,
-            user.delivery_type, user.pickup_date, user.pickup_time,
-            JSON.stringify(productDetails), total, orderNote
+            newOrderId, 
+            user.uuid, 
+            user.store_name, // receiver_name
+            user.phone,      // receiver_phone
+            user.address, 
+            user.delivery_type, 
+            user.pickup_date, 
+            user.pickup_time,
+            JSON.stringify(itemsJson), // items (jsonb)
+            total,           // total_amount
+            orderNote
         ]);
 
         // 5. 清空購物車
         await pool.query("DELETE FROM cart_items WHERE user_uuid = $1", [user.uuid]);
 
-        res.json({ message: "訂單已送出" });
+        res.json({ message: "訂單已送出", orderId: newOrderId });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "結帳失敗" });
+        console.error("結帳失敗:", err);
+        // 回傳詳細錯誤方便除錯
+        res.status(500).json({ message: "結帳失敗", error: err.message });
     }
 });
+
 
 // --- 後台管理相關 ---
 
 // 取得所有訂單 (需包含詳細欄位)
 app.get("/history", async (req, res) => {
     try {
-        // 這裡回傳全部，前端再做篩選，或在此做篩選皆可
         const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
-        // 轉換欄位名稱以符合前端需求
+        
+        // ⭐ 轉換欄位 (DB -> Frontend)
         const formatted = result.rows.map(row => ({
-            id: row.id,
+            id: row.order_id, // 前端依賴 id，我們將 order_id 對應過去
             時間: moment(row.created_at).format('YYYY-MM-DD HH:mm'),
-            rawTime: row.created_at, // 用於排序
+            rawTime: row.created_at,
             pickupDate: row.pickup_date,
             pickupTime: row.pickup_time,
             storeName: row.receiver_name,
-            total: row.總金額,
-            products: row.products,
+            total: row.total_amount, // DB: total_amount -> Frontend: total
+            products: row.items,     // DB: items -> Frontend: products (保持前端相容)
             isPrinted: row.is_printed || false
         }));
         res.json(formatted);
-    } catch (err) { res.status(500).json([]); }
+    } catch (err) { 
+        console.error("讀取歷史訂單失敗:", err);
+        res.status(500).json([]); 
+    }
 });
 
-// 下載 Excel 並標記為已列印
 app.get("/api/orders/:id/print", async (req, res) => {
-    const { id } = req.params;
+    const { id } = req.params; // 這裡的 id 對應 DB 的 order_id
     try {
-        // 1. 撈訂單
-        const orderRes = await pool.query("SELECT * FROM orders WHERE id = $1", [id]);
+        // ⭐ 修改 SQL: id -> order_id
+        const orderRes = await pool.query("SELECT * FROM orders WHERE order_id = $1", [id]);
         if (orderRes.rows.length === 0) return res.status(404).send("無此訂單");
         const order = orderRes.rows[0];
 
-        // 2. 更新列印狀態
-        await pool.query("UPDATE orders SET is_printed = TRUE WHERE id = $1", [id]);
+        await pool.query("UPDATE orders SET is_printed = TRUE WHERE order_id = $1", [id]);
 
-        // 3. 產生 Excel
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('訂單明細');
 
-        // 設定欄寬
         sheet.columns = [
             { header: '商品名稱', key: 'name', width: 30 },
             { header: '數量', key: 'qty', width: 10 },
@@ -462,8 +476,7 @@ app.get("/api/orders/:id/print", async (req, res) => {
             { header: '小計', key: 'subtotal', width: 15 },
         ];
 
-        // 標頭資訊
-        sheet.insertRow(1, [`訂單編號: ${order.id}`, `店家: ${order.receiver_name}`]);
+        sheet.insertRow(1, [`訂單編號: ${order.order_id}`, `店家: ${order.receiver_name}`]);
         sheet.insertRow(2, [`電話: ${order.receiver_phone}`]);
         const typeStr = order.pickup_type === 'self' ? '自取' : '外送';
         const dateStr = order.pickup_date === 'today' ? '今日' : order.pickup_date;
@@ -472,14 +485,13 @@ app.get("/api/orders/:id/print", async (req, res) => {
             sheet.insertRow(4, [`地址: ${order.address}`]);
         }
         sheet.insertRow(5, [`顧客整單備註: ${order.order_note || '無'}`]);
-        sheet.insertRow(6, ['']); // 空行
+        sheet.insertRow(6, ['']); 
 
-        // 插入表頭 (因為前面 insertRow，原本的 header row 會被推下去，需重新處理或直接手動加)
         sheet.getRow(7).values = ['商品名稱', '數量', '單價', '商品備註', '小計'];
         sheet.getRow(7).font = { bold: true };
 
-        // 商品內容
-        const products = order.products || []; // 假設資料庫存的是 JSON
+        // ⭐ 修改: products -> items
+        const products = order.items || []; 
         let totalAmount = 0;
         products.forEach(p => {
             const sub = Number(p.price) * Number(p.qty);
@@ -489,7 +501,6 @@ app.get("/api/orders/:id/print", async (req, res) => {
 
         sheet.addRow(['', '', '', '總金額', totalAmount]);
 
-        // 設定 Response Header 讓瀏覽器下載
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename=order-${id}.xlsx`);
 
@@ -502,14 +513,13 @@ app.get("/api/orders/:id/print", async (req, res) => {
     }
 });
 
-// 刪除訂單 (維持原樣)
-app.delete("/history/:id", async (req, res) => { /* ...略... */
+app.delete("/history/:id", async (req, res) => {
     try {
-        await pool.query('DELETE FROM orders WHERE id = $1', [req.params.id]);
+        // ⭐ 修改 SQL: id -> order_id
+        await pool.query('DELETE FROM orders WHERE order_id = $1', [req.params.id]);
         res.json({ message: "已刪除" });
     } catch (err) { res.status(500).json({ message: "刪除失敗" }); }
 });
-
 
 // 其他 api 路由都設定完後：
 app.use((req, res, next) => {
