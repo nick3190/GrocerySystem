@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
+
 const SECRET_KEY = "YOUR_SECRET_KEY_FOR_JWT"; // 請務必更換為安全密鑰
 const distPath = path.join(__dirname, "../dist");
 
@@ -62,6 +63,17 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
+// --- 工具函式：標準化手機號碼 ---
+const formatPhone = (rawPhone) => {
+    if (!rawPhone) return null;
+    let p = rawPhone.replace(/\s+/g, '').replace(/-/g, '');
+    if (p.startsWith('+88609')) return '+886' + p.substring(5);
+    if (p.startsWith('88609')) return '+886' + p.substring(4);
+    if (p.startsWith('09')) return '+886' + p.substring(1);
+    if (p.startsWith('8869')) return '+' + p;
+    return p;
+};
+
 // --- Helper: JWT/Cookie 驗證 ---
 const verifyToken = (req) => {
     const token = req.cookies.auth_token;
@@ -86,12 +98,8 @@ app.post("/api/send-otp", async (req, res) => {
     // 這裡做個簡單處理：如果輸入 09 開頭，轉成 +8869...
     let { phone } = req.body;
 
-    if (!phone) return res.status(400).json({ message: "請輸入手機號碼" });
-
-    // 格式化台灣手機號碼 (將 09xx 轉為 +8869xx)
-    if (phone.startsWith('09')) {
-        phone = '+886' + phone.substring(1);
-    }
+    const formattedPhone = formatPhone(phone);
+    if (!formattedPhone) return res.status(400).json({ message: "手機號碼格式錯誤" });
 
     // 產生 4 位數驗證碼
     const code = Math.floor(1000 + Math.random() * 9000).toString();
@@ -134,10 +142,7 @@ app.post("/api/send-otp", async (req, res) => {
 app.post("/api/verify-otp", async (req, res) => {
     const { phone, otp, storeName, deliveryType, address, pickupDate, pickupTime } = req.body;
 
-    let formattedPhone = phone;
-    if (formattedPhone.startsWith('09')) {
-        formattedPhone = '+886' + formattedPhone.substring(1);
-    }
+    const formattedPhone = formatPhone(phone);
 
     try {
         const otpResult = await pool.query('SELECT * FROM otps WHERE phone = $1', [formattedPhone]);
@@ -148,7 +153,7 @@ app.post("/api/verify-otp", async (req, res) => {
         if (record.code !== otp) return res.status(400).json({ message: "驗證碼錯誤" });
 
         // 更新或建立使用者
-        let userResult = await pool.query('SELECT * FROM users WHERE phone = $1', [phone]);
+        let userResult = await pool.query('SELECT * FROM users WHERE phone = $1', [formattedPhone]);
 
         const sqlParams = [storeName, phone, deliveryType, address, pickupDate, pickupTime];
 
@@ -246,7 +251,7 @@ app.put("/products/:id", async (req, res) => {
     const { name, price_A, price_B, spec, unit, brand } = req.body;
     try {
         await pool.query(
-            `UPDATE products SET name=$1, price_A=$2, price_B=$3, spec=$4, unit=$5, brand=$6 WHERE id=$7`,
+            `UPDATE products SET name=$1, "price_A"=$2, "price_B"=$3, spec=$4, unit=$5, brand=$6 WHERE id=$7`,
             [name, price_A, price_B, spec, unit, brand, id]
         );
         res.json({ message: "更新成功" });
@@ -296,7 +301,7 @@ app.get("/cart", requireAuth, async (req, res) => {
         const sql = `
             SELECT c.id, c.product_id, c.quantity, c.note, 
                    p.name, p.spec, p.unit, p.brand,
-                   p.${priceColumn} as price
+                   p."${priceColumn}" as price
             FROM cart_items c
             JOIN products p ON CAST(c.product_id AS INTEGER) = p.id
             WHERE c.user_uuid = $1
@@ -359,8 +364,9 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
         // 2. 抓取購物車內容
         const cartRes = await pool.query(`
-            SELECT c.*, p.name, p.price_A, p.price_B 
-            FROM cart_items c JOIN products p ON c.product_id = CAST(p.id AS VARCHAR) 
+            SELECT c.*, p.name, p."price_A", p."price_B" 
+            FROM cart_items c 
+            JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
             WHERE c.user_uuid = $1`, [user.uuid]);
 
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "購物車是空的" });
@@ -368,6 +374,8 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         // 3. 計算總金額
         const isB = user.price_tier === 'B';
         const total = cartRes.rows.reduce((sum, item) => {
+            // 注意：Postgres 回傳的 key 會跟 SQL 欄位名一致
+            // 如果我們用 "price_A"，回傳物件屬性就是 item.price_A
             const price = isB ? item.price_B : item.price_A;
             return sum + (Number(price) * item.quantity);
         }, 0);
