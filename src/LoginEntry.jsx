@@ -28,7 +28,7 @@ function LoginEntry() {
 
     const handleSendOTP = async () => {
         if (!formData.storeName || !formData.phone) return alert("請填寫店家名稱與手機");
-        
+
         // 驗證邏輯
         if (activeTab === 'delivery') {
             if (!formData.address) return alert("外送請填寫地址");
@@ -54,17 +54,21 @@ function LoginEntry() {
         if (!formData.otp) return alert("請輸入驗證碼");
         setIsLoading(true);
         try {
-            // 組合資料
+            // 處理日期：如果是 "today"，轉換成 YYYY-MM-DD
+            let finalDate = pickupDateType === 'today'
+                ? new Date().toISOString().split('T')[0] // 取得今日日期 YYYY-MM-DD
+                : customDate;
+
             const payload = {
                 ...formData,
                 deliveryType: activeTab,
-                pickupDate: pickupDateType === 'today' ? 'today' : customDate,
-                pickupTime: activeTab === 'self' ? pickupTime : '' // 外送不需要時段
+                pickupDate: finalDate, // 傳送處理過的日期
+                pickupTime: activeTab === 'self' ? pickupTime : ''
             };
 
             const res = await api.post('/api/verify-otp', payload);
             console.log("登入成功:", res.data);
-            navigate('/productList');
+            navigate('/productList'); // 導向商品頁
         } catch (error) {
             alert(error.response?.data?.message || "驗證失敗");
         } finally {
@@ -89,7 +93,7 @@ function LoginEntry() {
                         <>
                             <input name="storeName" placeholder="店家名稱" value={formData.storeName} onChange={handleInputChange} className="main-input" />
                             <input name="phone" placeholder="手機號碼" value={formData.phone} onChange={handleInputChange} className="main-input" />
-                            
+
                             {/* 外送介面 */}
                             {activeTab === 'delivery' && (
                                 <input name="address" placeholder="送貨地址" value={formData.address} onChange={handleInputChange} className="main-input" />
@@ -97,9 +101,9 @@ function LoginEntry() {
 
                             {/* 自取介面 */}
                             {activeTab === 'self' && (
-                                <div className="self-pickup-options" style={{textAlign: 'left'}}>
+                                <div className="self-pickup-options" style={{ textAlign: 'left' }}>
                                     <p>選擇日期：</p>
-                                    <div style={{display: 'flex', gap: '10px', marginBottom: '10px'}}>
+                                    <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
                                         <label>
                                             <input type="radio" name="dateType" checked={pickupDateType === 'today'} onChange={() => setPickupDateType('today')} /> 今日取貨
                                         </label>
@@ -111,7 +115,7 @@ function LoginEntry() {
                                         <input type="date" className="main-input" value={customDate} onChange={(e) => setCustomDate(e.target.value)} />
                                     )}
 
-                                    <p style={{marginTop: '10px'}}>選擇時段：</p>
+                                    <p style={{ marginTop: '10px' }}>選擇時段：</p>
                                     <select className="main-input" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}>
                                         <option value="">請選擇時段</option>
                                         <option value="08:00-11:00">早 08:00 - 11:00</option>

@@ -3,9 +3,9 @@ import express from "express";
 import cors from "cors";
 import crypto from 'crypto';
 import cookieParser from 'cookie-parser';
-import pool from './db.js'; // 確保 db.js 已設定好
-import ExcelJS from 'exceljs'; // 新增
-import moment from 'moment';   // 新增
+import pool from './db.js';
+import ExcelJS from 'exceljs';
+import moment from 'moment';
 import twilio from 'twilio';
 
 import path from 'path';
@@ -14,8 +14,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
-
-const SECRET_KEY = "YOUR_SECRET_KEY_FOR_JWT"; // 請務必更換為安全密鑰
+const SECRET_KEY = process.env.SECRET_KEY || "YOUR_FALLBACK_SECRET_KEY"; 
 const distPath = path.join(__dirname, "../dist");
 
 app.use(express.static(path.join(distPath)));
@@ -28,61 +27,41 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
-const requireAuth = (req, res, next) => {
-    const user = verifyToken(req);
 
-    // ⭐ 本機開發方便測試用
-    if (!isProduction && !user) {
-        console.log("⚠️ 開發模式：使用模擬使用者身份");
-        req.user = {
-            uuid: "DEV-UUID",
-            priceTier: "A",
-            // 建議補上這兩行，避免某些 API 因為讀不到欄位報錯
-            store_name: "開發測試店",
-            phone: "0900000000"
-        };
-        return next();
-    }
+// --- 工具函式 ---
 
-    // ⭐ 上線：一定要登入
-    if (!user) return res.status(401).json({ message: "請先登入" });
-
-    req.user = user;
-    next();
-};
-
-// Middleware
-app.use(cors({
-    origin: isProduction
-        ? ["https://grocerysystem-s04n.onrender.com"] // 上線後的網址
-        : ["http://localhost:5173", "http://127.0.0.1:5173"], // 本地開發網址
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true // 允許攜帶 Cookie
-}));
-
-app.use(express.json());
-app.use(cookieParser());
-
-// --- 工具函式：標準化手機號碼 ---
+// 1. 標準化手機號碼 (修復 09 開頭問題)
 const formatPhone = (rawPhone) => {
     if (!rawPhone) return null;
-    let p = rawPhone.replace(/\s+/g, '').replace(/-/g, '');
-    if (p.startsWith('+88609')) return '+886' + p.substring(5);
-    if (p.startsWith('88609')) return '+886' + p.substring(4);
-    if (p.startsWith('09')) return '+886' + p.substring(1);
-    if (p.startsWith('8869')) return '+' + p;
+    let p = rawPhone.toString().replace(/\s+/g, '').replace(/-/g, '');
+    
+    // 處理 +886 開頭
+    if (p.startsWith('+886')) {
+        // 如果是 +88609... 轉為 +8869...
+        if (p.startsWith('+88609')) return '+886' + p.substring(5);
+        return p;
+    }
+    // 處理 886 開頭
+    if (p.startsWith('886')) {
+        if (p.startsWith('88609')) return '+886' + p.substring(4);
+        return '+' + p;
+    }
+    // 處理 09 開頭
+    if (p.startsWith('09')) {
+        return '+886' + p.substring(1);
+    }
     return p;
 };
-// --- 工具函式：產生訂單編號 (格式：YYYYMMDDHHmm + 3位亂數) ---
+
+// 2. 產生訂單編號
 const generateOrderId = () => {
     const now = new Date();
-    // 轉成台北時間字串 (簡單做法)
-    const dateStr = now.toISOString().replace(/[-T:.Z]/g, "").slice(0, 12); // 取到分
+    const dateStr = now.toISOString().replace(/[-T:.Z]/g, "").slice(0, 12);
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     return `${dateStr}${random}`;
 };
 
-// --- Helper: JWT/Cookie 驗證 ---
+// 3. JWT 驗證
 const verifyToken = (req) => {
     const token = req.cookies.auth_token;
     if (!token) return null;
@@ -96,60 +75,77 @@ const verifyToken = (req) => {
     return null;
 };
 
+// Middleware
+const requireAuth = (req, res, next) => {
+    const user = verifyToken(req);
+    if (!isProduction && !user) {
+        console.log("⚠️ 開發模式：使用模擬使用者身份");
+        req.user = {
+            uuid: "DEV-UUID",
+            priceTier: "A",
+            store_name: "開發測試店",
+            phone: "0900000000"
+        };
+        return next();
+    }
+    if (!user) return res.status(401).json({ message: "請先登入" });
+    req.user = user;
+    next();
+};
+
+app.use(cors({
+    origin: isProduction
+        ? ["https://grocerysystem-s04n.onrender.com"] 
+        : ["http://localhost:5173", "http://127.0.0.1:5173"], 
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true 
+}));
+
+app.use(express.json());
+app.use(cookieParser());
+
+
 // ================= API 路由 =================
 
-// --- 1. 身份驗證 (無密碼/OTP) ---
+// --- 1. 登入與驗證 ---
 
-// 發送驗證碼
 app.post("/api/send-otp", async (req, res) => {
-    // 前端傳來的 phone，Twilio 需要 E.164 格式 (+8869xxxxxxxx)
-    // 這裡做個簡單處理：如果輸入 09 開頭，轉成 +8869...
     let { phone } = req.body;
-
     const formattedPhone = formatPhone(phone);
+    
     if (!formattedPhone) return res.status(400).json({ message: "手機號碼格式錯誤" });
 
-    // 產生 4 位數驗證碼
     const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5分鐘後過期
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); 
 
     try {
-        // 先存入資料庫
         await pool.query(
             `INSERT INTO otps (phone, code, expires_at) VALUES ($1, $2, $3)
              ON CONFLICT (phone) DO UPDATE SET code = $2, expires_at = $3`,
-            [phone, code, expiresAt]
+            [formattedPhone, code, expiresAt]
         );
 
-        // 3. 修改：判斷並發送簡訊
         if (twilioClient && process.env.TWILIO_PHONE_NUMBER) {
             await twilioClient.messages.create({
                 body: `【元榮批發】您的驗證碼是：${code}，請於 5 分鐘內輸入。`,
                 from: process.env.TWILIO_PHONE_NUMBER,
-                to: phone
+                to: formattedPhone
             });
-            console.log(`✅ Twilio 簡訊已發送至 ${phone}`);
+            console.log(`✅ Twilio 簡訊已發送至 ${formattedPhone}`);
             res.json({ message: "驗證碼已發送" });
         } else {
-            // 如果沒有設定 Twilio (例如本地開發)，還是印在 Console
-            console.log(`=== 【開發模式/未設定Twilio】 手機: ${phone}, 驗證碼: ${code} ===`);
-            res.json({ message: "驗證碼已發送 (開發模式: 請看 Console)" });
+            console.log(`=== 【開發模式】 手機: ${formattedPhone}, 驗證碼: ${code} ===`);
+            res.json({ message: "驗證碼已發送 (開發模式)" });
         }
-
     } catch (err) {
         console.error("簡訊發送錯誤:", err);
-        // 如果是 Twilio 錯誤 (例如號碼未驗證)，回傳具體一點的訊息方便除錯
-        if (err.code) {
-            return res.status(500).json({ message: `簡訊發送失敗: ${err.message}` });
-        }
+        if (err.code) return res.status(500).json({ message: `簡訊發送失敗: ${err.message}` });
         res.status(500).json({ message: "系統錯誤" });
     }
 });
 
-// 驗證 OTP 並登入
 app.post("/api/verify-otp", async (req, res) => {
     const { phone, otp, storeName, deliveryType, address, pickupDate, pickupTime } = req.body;
-
     const formattedPhone = formatPhone(phone);
 
     try {
@@ -160,10 +156,19 @@ app.post("/api/verify-otp", async (req, res) => {
         if (new Date() > new Date(record.expires_at)) return res.status(400).json({ message: "驗證碼已過期" });
         if (record.code !== otp) return res.status(400).json({ message: "驗證碼錯誤" });
 
-        // 更新或建立使用者
+        // 處理日期：如果前端傳來 'today'，轉為實際日期 YYYY-MM-DD，確保資料庫存的是日期
+        let finalDate = pickupDate;
+        if (pickupDate === 'today') {
+            finalDate = moment().format('YYYY-MM-DD');
+        }
+
         let userResult = await pool.query('SELECT * FROM users WHERE phone = $1', [formattedPhone]);
 
-        const sqlParams = [storeName, phone, deliveryType, address, pickupDate, pickupTime];
+        // 確保 deliveryType 是 'self' 或 'delivery'
+        // 如果是 delivery，清空自取時間
+        const finalTime = deliveryType === 'delivery' ? '' : pickupTime;
+
+        const sqlParams = [storeName, formattedPhone, deliveryType, address, finalDate, finalTime];
 
         if (userResult.rows.length === 0) {
             userResult = await pool.query(
@@ -193,23 +198,19 @@ app.post("/api/verify-otp", async (req, res) => {
 
         const userDataStr = JSON.stringify(payload);
         const dataBase64 = Buffer.from(userDataStr).toString('base64');
-
-        const signature = crypto.createHmac('sha256', SECRET_KEY)
-            .update(dataBase64)
-            .digest('hex');
-
+        const signature = crypto.createHmac('sha256', SECRET_KEY).update(dataBase64).digest('hex');
         const token = `${dataBase64}.${signature}`;
 
-        await pool.query('DELETE FROM otps WHERE phone = $1', [phone]);
+        await pool.query('DELETE FROM otps WHERE phone = $1', [formattedPhone]);
+        
         res.cookie("auth_token", token, {
             httpOnly: true,
             maxAge: 86400000,
             path: "/",
-            secure: isProduction ? true : false,          // localhost 必須 false
-            sameSite: isProduction ? "None" : "Lax"      // <-- 改成 None（不是 Lax）
+            secure: isProduction,
+            sameSite: isProduction ? "None" : "Lax"
         });
 
-        console.log("Cookie 設定完成，Token:", token.substring(0, 10) + "...");
         res.json({ message: "登入成功", user: payload });
 
     } catch (err) {
@@ -218,12 +219,9 @@ app.post("/api/verify-otp", async (req, res) => {
     }
 });
 
-// 檢查登入狀態
 app.get("/api/me", async (req, res) => {
     const tokenPayload = verifyToken(req);
     if (!tokenPayload) return res.status(401).json({ isAuthenticated: false });
-
-    // 重新從資料庫撈取最新 User 資料 (確保取貨資訊是最新的)
     try {
         const userRes = await pool.query('SELECT * FROM users WHERE uuid = $1', [tokenPayload.uuid]);
         if (userRes.rows.length > 0) {
@@ -236,13 +234,12 @@ app.get("/api/me", async (req, res) => {
     }
 });
 
-
 app.post("/logout", (req, res) => {
     res.clearCookie('auth_token');
     res.json({ message: "已登出" });
 });
 
-// --- 2. 商品資料 API (包含篩選用的列表) ---
+// --- 2. 商品 API ---
 
 app.get("/products", async (req, res) => {
     try {
@@ -254,7 +251,6 @@ app.get("/products", async (req, res) => {
 });
 
 app.put("/products/:id", async (req, res) => {
-    // 這裡不做 Admin 權限驗證 (簡化)，實際專案請加上
     const { id } = req.params;
     const { name, price_A, price_B, spec, unit, brand } = req.body;
     try {
@@ -264,12 +260,11 @@ app.put("/products/:id", async (req, res) => {
         );
         res.json({ message: "更新成功" });
     } catch (err) {
-        console.error(err);
+        console.error("更新商品失敗:", err);
         res.status(500).json({ message: "更新失敗" });
     }
 });
 
-// 新增：取得分類列表 (供前端篩選)
 app.get("/api/categories", async (req, res) => {
     try {
         const result = await pool.query('SELECT DISTINCT main_category, sub_category FROM products');
@@ -284,7 +279,6 @@ app.get("/api/categories", async (req, res) => {
     } catch (err) { res.status(500).json({}); }
 });
 
-// 新增：取得品牌列表 (供前端篩選)
 app.get("/api/brands", async (req, res) => {
     try {
         const result = await pool.query("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != ''");
@@ -292,20 +286,15 @@ app.get("/api/brands", async (req, res) => {
     } catch (err) { res.json([]); }
 });
 
-// --- 3. 購物車 API (需驗證) ---
+// --- 3. 購物車 API ---
+
 app.get("/cart", requireAuth, async (req, res) => {
     const user = req.user;
     try {
-        if (!user || !user.uuid) {
-            console.error("❌ 購物車錯誤: User UUID 遺失");
-            return res.status(401).json({ message: "使用者未授權" });
-        }
-
+        if (!user || !user.uuid) return res.status(401).json({ message: "使用者未授權" });
         const tier = user.priceTier || user.price_tier || 'A';
         const priceColumn = tier === 'B' ? 'price_B' : 'price_A';
 
-        // ⭐ 修正重點：加入 CAST(c.product_id AS INTEGER)
-        // 這會將 cart_items 的文字型態 ID 轉為數字，才能跟 products 的數字 ID 比對
         const sql = `
             SELECT c.id, c.product_id, c.quantity, c.note, 
                    p.name, p.spec, p.unit, p.brand,
@@ -315,23 +304,17 @@ app.get("/cart", requireAuth, async (req, res) => {
             WHERE c.user_uuid = $1
             ORDER BY c.created_at DESC
         `;
-
         const result = await pool.query(sql, [user.uuid]);
         res.json(result.rows);
-
     } catch (err) {
-        console.error("❌ 讀取購物車失敗 (GET /cart):", err.message);
-        // 如果還有其他 SQL 錯誤，這裡會印出詳細內容
+        console.error("❌ 讀取購物車失敗:", err.message);
         res.status(500).json({ message: "伺服器內部錯誤", error: err.message });
     }
 });
 
 app.post("/cart", requireAuth, async (req, res) => {
     const user = req.user;
-    //const user = verifyToken(req);
-    //if (!user) return res.status(401).send();
     const { productId, quantity, note } = req.body;
-
     try {
         await pool.query(
             `INSERT INTO cart_items (user_uuid, product_id, quantity, note)
@@ -342,31 +325,29 @@ app.post("/cart", requireAuth, async (req, res) => {
         );
         res.json({ message: "已加入購物車" });
     } catch (err) {
+        console.error("加入購物車失敗:", err);
         res.status(500).json({ message: "加入失敗" });
     }
 });
 
 app.delete("/cart/:id", requireAuth, async (req, res) => {
     const user = req.user;
-    //const user = verifyToken(req);
-    //if (!user) return res.status(401).send();
     try {
         await pool.query('DELETE FROM cart_items WHERE id = $1 AND user_uuid = $2', [req.params.id, user.uuid]);
         res.json({ message: "已刪除" });
-    } catch (err) {
-        res.status(500).json({ message: "刪除失敗" });
-    }
+    } catch (err) { res.status(500).json({ message: "刪除失敗" }); }
 });
+
+// --- 4. 結帳與訂單 ---
 
 app.post("/api/checkout", requireAuth, async (req, res) => {
     const user = req.user;
     const { orderNote } = req.body;
 
     try {
-        // 1. 抓取完整使用者資料
         const userRes = await pool.query("SELECT * FROM users WHERE uuid = $1", [user.uuid]);
-        
-        // 2. 抓取購物車內容 (計算總金額)
+        const dbUser = userRes.rows[0];
+
         const cartRes = await pool.query(`
             SELECT c.*, p.name, p."price_A", p."price_B" 
             FROM cart_items c 
@@ -375,13 +356,12 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "購物車是空的" });
 
-        const isB = user.price_tier === 'B';
+        const isB = dbUser.price_tier === 'B';
         const total = cartRes.rows.reduce((sum, item) => {
             const price = isB ? item.price_B : item.price_A;
             return sum + (Number(price) * item.quantity);
         }, 0);
 
-        // 整理商品明細 JSON
         const itemsJson = cartRes.rows.map(item => ({
             id: item.product_id,
             name: item.name,
@@ -390,11 +370,9 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
             price: isB ? item.price_B : item.price_A
         }));
 
-        // ⭐ 產生訂單編號 (因為資料庫 order_id 不是 serial)
         const newOrderId = generateOrderId();
 
-        // ⭐ 寫入 orders (適配新 Schema)
-        // 欄位對應：products -> items, "總金額" -> total_amount
+        // 確保使用 DB 中最新的 pickup_date (這在 verify-otp 時已經確保不是 'today' 而是日期)
         const insertSql = `
             INSERT INTO orders 
             (order_id, user_uuid, receiver_name, receiver_phone, address, 
@@ -406,47 +384,44 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         await pool.query(insertSql, [
             newOrderId, 
             user.uuid, 
-            user.store_name, // receiver_name
-            user.phone,      // receiver_phone
-            user.address, 
-            user.delivery_type, 
-            user.pickup_date, 
-            user.pickup_time,
-            JSON.stringify(itemsJson), // items (jsonb)
-            total,           // total_amount
+            dbUser.store_name, 
+            dbUser.phone,      
+            dbUser.address, 
+            dbUser.delivery_type, 
+            dbUser.pickup_date, 
+            dbUser.pickup_time,
+            JSON.stringify(itemsJson), 
+            total,           
             orderNote
         ]);
 
-        // 5. 清空購物車
         await pool.query("DELETE FROM cart_items WHERE user_uuid = $1", [user.uuid]);
 
         res.json({ message: "訂單已送出", orderId: newOrderId });
     } catch (err) {
         console.error("結帳失敗:", err);
-        // 回傳詳細錯誤方便除錯
         res.status(500).json({ message: "結帳失敗", error: err.message });
     }
 });
 
+// --- 後台管理 API ---
 
-// --- 後台管理相關 ---
-
-// 取得所有訂單 (需包含詳細欄位)
+// 1. 取得所有訂單 (給 Admin)
 app.get("/history", async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
-        
-        // ⭐ 轉換欄位 (DB -> Frontend)
         const formatted = result.rows.map(row => ({
-            id: row.order_id, // 前端依賴 id，我們將 order_id 對應過去
+            id: row.order_id,
             時間: moment(row.created_at).format('YYYY-MM-DD HH:mm'),
             rawTime: row.created_at,
-            pickupDate: row.pickup_date,
+            pickupDate: row.pickup_date, // 這裡會是 YYYY-MM-DD
             pickupTime: row.pickup_time,
             storeName: row.receiver_name,
-            total: row.total_amount, // DB: total_amount -> Frontend: total
-            products: row.items,     // DB: items -> Frontend: products (保持前端相容)
-            isPrinted: row.is_printed || false
+            total: row.total_amount,
+            products: row.items,
+            isPrinted: row.is_printed || false,
+            // 補上使用者資訊以便關聯
+            user_uuid: row.user_uuid 
         }));
         res.json(formatted);
     } catch (err) { 
@@ -455,10 +430,31 @@ app.get("/history", async (req, res) => {
     }
 });
 
-app.get("/api/orders/:id/print", async (req, res) => {
-    const { id } = req.params; // 這裡的 id 對應 DB 的 order_id
+// 2. 取得使用者列表 (給 Admin)
+app.get("/api/users", async (req, res) => {
     try {
-        // ⭐ 修改 SQL: id -> order_id
+        // 同時抓出該使用者的訂單數與總消費金額
+        const sql = `
+            SELECT u.*, 
+                   COUNT(o.order_id) as order_count,
+                   SUM(o.total_amount) as total_spent
+            FROM users u
+            LEFT JOIN orders o ON u.uuid = o.user_uuid
+            GROUP BY u.uuid
+            ORDER BY u.id DESC
+        `;
+        const result = await pool.query(sql);
+        res.json(result.rows);
+    } catch (err) {
+        console.error("讀取使用者失敗:", err);
+        res.status(500).json([]);
+    }
+});
+
+// 3. 列印功能 (修正 items 和 total_amount)
+app.get("/api/orders/:id/print", async (req, res) => {
+    const { id } = req.params;
+    try {
         const orderRes = await pool.query("SELECT * FROM orders WHERE order_id = $1", [id]);
         if (orderRes.rows.length === 0) return res.status(404).send("無此訂單");
         const order = orderRes.rows[0];
@@ -479,8 +475,7 @@ app.get("/api/orders/:id/print", async (req, res) => {
         sheet.insertRow(1, [`訂單編號: ${order.order_id}`, `店家: ${order.receiver_name}`]);
         sheet.insertRow(2, [`電話: ${order.receiver_phone}`]);
         const typeStr = order.pickup_type === 'self' ? '自取' : '外送';
-        const dateStr = order.pickup_date === 'today' ? '今日' : order.pickup_date;
-        sheet.insertRow(3, [`方式: ${typeStr}`, `日期: ${dateStr}`, `時段: ${order.pickup_time || '無'}`]);
+        sheet.insertRow(3, [`方式: ${typeStr}`, `日期: ${order.pickup_date}`, `時段: ${order.pickup_time || '無'}`]);
         if (order.pickup_type === 'delivery') {
             sheet.insertRow(4, [`地址: ${order.address}`]);
         }
@@ -490,7 +485,6 @@ app.get("/api/orders/:id/print", async (req, res) => {
         sheet.getRow(7).values = ['商品名稱', '數量', '單價', '商品備註', '小計'];
         sheet.getRow(7).font = { bold: true };
 
-        // ⭐ 修改: products -> items
         const products = order.items || []; 
         let totalAmount = 0;
         products.forEach(p => {
@@ -515,18 +509,38 @@ app.get("/api/orders/:id/print", async (req, res) => {
 
 app.delete("/history/:id", async (req, res) => {
     try {
-        // ⭐ 修改 SQL: id -> order_id
         await pool.query('DELETE FROM orders WHERE order_id = $1', [req.params.id]);
         res.json({ message: "已刪除" });
     } catch (err) { res.status(500).json({ message: "刪除失敗" }); }
 });
 
-// 其他 api 路由都設定完後：
+// --- User 端歷史訂單 API (專屬該 User) ---
+app.get("/api/my-history", requireAuth, async (req, res) => {
+    const user = req.user;
+    try {
+        const result = await pool.query('SELECT * FROM orders WHERE user_uuid = $1 ORDER BY created_at DESC', [user.uuid]);
+        const formatted = result.rows.map(row => ({
+            id: row.order_id,
+            時間: moment(row.created_at).format('YYYY-MM-DD HH:mm'),
+            pickupDate: row.pickup_date,
+            pickupTime: row.pickup_time,
+            storeName: row.receiver_name,
+            total: row.total_amount,
+            products: row.items,
+            isPrinted: row.is_printed || false
+        }));
+        res.json(formatted);
+    } catch (err) {
+        console.error("讀取個人訂單失敗:", err);
+        res.status(500).json([]);
+    }
+});
+
+
 app.use((req, res, next) => {
     if (req.path.startsWith("/api")) return next();
     res.sendFile(path.join(distPath, "index.html"));
 });
-
 
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);

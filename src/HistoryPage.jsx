@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import "./HistoryPage.css";
+import api from "./api"; // 請確保使用你設定好的 api instance
 
 function HistoryPage() {
     const [list, setList] = useState([]);
@@ -9,7 +10,8 @@ function HistoryPage() {
 
     const fetchHistoryList = async () => {
         try {
-            const response = await axios.get('/history'); // 假設您的 API 路徑
+            // ⭐ 修正：只抓取自己的訂單
+            const response = await api.get('/api/my-history');
             setList(response.data);
         } catch (err) {
             console.error("讀取訂單失敗:", err);
@@ -19,38 +21,25 @@ function HistoryPage() {
     }
 
     const toggleOrderDetails = (orderId) => {
-        if (expandedOrderId === orderId) {
-            setExpandedOrderId(null);
-        } else {
-            setExpandedOrderId(orderId);
-        }
+        setExpandedOrderId(expandedOrderId === orderId ? null : orderId);
     }
 
-    // --- 新增功能：將整筆訂單加入購物車 ---
     const addHistoryToCart = async (products) => {
-        if (!products || products.length === 0) {
-            alert("此訂單沒有商品可以加入");
-            return;
-        }
-
-        const confirmAdd = window.confirm(`確定要將這 ${products.length} 項商品加入購物車嗎？`);
-        if (!confirmAdd) return;
+        if (!products || products.length === 0) return alert("無商品可加入");
+        if (!window.confirm(`確定要將這 ${products.length} 項商品加入購物車嗎？`)) return;
 
         try {
-            // 由於 json-server 通常不支援一次 POST 陣列，這裡使用 Promise.all 逐筆加入
-            // 如果您的後端支援批次加入 (Batch Insert)，請改成一次 API 呼叫
             const promises = products.map(product => {
-                return axios.post('/cart', {
-                    ...product,
-                    quantity: product['商品數量'] || 1 // 確保有數量
+                return api.post('/cart', {
+                    productId: product.id, // 注意這裡要對應後端需要的 productId
+                    quantity: product.qty || 1,
+                    note: product.note || ''
                 });
             });
-
             await Promise.all(promises);
             alert("商品已成功加入購物車！");
         } catch (error) {
-            console.error("加入購物車失敗:", error);
-            alert("加入失敗，可能是部分商品重複或網路問題");
+            alert("加入失敗，請稍後再試");
         }
     };
 
@@ -59,48 +48,64 @@ function HistoryPage() {
     }, []);
 
     return (
-        <div className="history-page">
-            <h1>歷史訂單</h1>
+        <div className="history-page" style={{paddingTop: '80px', maxWidth: '800px', margin: '0 auto'}}>
+            <h2 style={{textAlign: 'center', marginBottom: '20px', color: '#333'}}>我的歷史訂單</h2>
+            
             {loading ? (
-                <p>載入商品中...</p>
+                <p style={{textAlign:'center'}}>載入中...</p>
             ) : list.length === 0 ? (
-                <p>沒有歷史訂單</p>
+                <div style={{textAlign:'center', color:'#888'}}>尚無訂單紀錄</div>
             ) : (
-                <div className="history-list-container">
-                    {list.map((item, index) => (
-                        <div key={item.id || index} className="history-list-item">
-                            <h3>{`${item['時間']} 的訂單`}</h3>
-                            
-                            <div className="history-actions">
+                <div className="history-list">
+                    {list.map((item) => (
+                        <div key={item.id} className="history-card" style={{
+                            background: 'white', 
+                            borderRadius: '10px', 
+                            padding: '15px', 
+                            marginBottom: '15px',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                            border: '1px solid #eee'
+                        }}>
+                            {/* 訂單頭部資訊 */}
+                            <div style={{display:'flex', justifyContent:'space-between', marginBottom:'10px', borderBottom:'1px solid #f0f0f0', paddingBottom:'10px'}}>
+                                <div>
+                                    <div style={{fontWeight:'bold', color:'#333'}}>{item.pickupDate}</div>
+                                    <div style={{fontSize:'0.9rem', color:'#666'}}>{item.pickupTime || '外送'}</div>
+                                </div>
+                                <div style={{textAlign:'right'}}>
+                                    <div style={{color:'#e53935', fontWeight:'bold', fontSize:'1.1rem'}}>${item.total}</div>
+                                    <div style={{fontSize:'0.8rem', color: item.isPrinted ? 'green' : 'orange'}}>
+                                        {item.isPrinted ? '店家已接單' : '處理中'}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 操作按鈕 */}
+                            <div style={{display:'flex', gap:'10px'}}>
                                 <button 
-                                    className="btn-view-history-list" 
-                                    onClick={() => toggleOrderDetails(item.id || index)}
-                                > 
-                                    {expandedOrderId === (item.id || index) ? "隱藏詳情" : "查看明細"}
+                                    style={{flex:1, padding:'8px', background:'#f0f0f0', border:'none', borderRadius:'5px'}}
+                                    onClick={() => toggleOrderDetails(item.id)}
+                                >
+                                    {expandedOrderId === item.id ? "收起明細" : "查看明細"}
                                 </button>
-                                
-                                {/* 新增 onClick 事件 */}
                                 <button 
-                                    className="btn-add-history-to-cart" 
+                                    style={{flex:1, padding:'8px', background:'#e53935', color:'white', border:'none', borderRadius:'5px'}}
                                     onClick={() => addHistoryToCart(item.products)}
                                 >
-                                    加入當前購物車
+                                    再買一次
                                 </button>
                             </div>
 
-                            {expandedOrderId === (item.id || index) && (
-                                <div className="order-details">
-                                    {item.products && item.products.length > 0 ? (
-                                        item.products.map((prod, pIndex) => (
-                                            <div key={pIndex} className="detail-row">
-                                                <span>{prod['商品名稱']}</span>
-                                                <span>${prod['商品價格']}</span>
-                                                <span>x{prod['商品數量']}</span>
-                                            </div>
-                                        ))
-                                    ) : (
-                                        <p>無商品資料</p>
-                                    )}
+                            {/* 展開明細 */}
+                            {expandedOrderId === item.id && (
+                                <div style={{marginTop:'15px', background:'#fafafa', padding:'10px', borderRadius:'5px'}}>
+                                    {item.products.map((p, idx) => (
+                                        <div key={idx} style={{display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px dashed #ddd'}}>
+                                            <span style={{flex:2}}>{p.name} {p.note && <span style={{fontSize:'0.8em', color:'#888'}}>({p.note})</span>}</span>
+                                            <span style={{flex:1, textAlign:'right'}}>x{p.qty}</span>
+                                            <span style={{flex:1, textAlign:'right'}}>${p.price}</span>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>
@@ -109,6 +114,6 @@ function HistoryPage() {
             )}
         </div>
     );
-};
+}
 
 export default HistoryPage;

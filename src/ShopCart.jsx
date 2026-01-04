@@ -94,7 +94,7 @@ function ShopCart() {
                                 <p>${item.price} x {item.quantity}</p>
                                 <p className="subtotal">小計: ${item.price * item.quantity}</p>
                             </div>
-                            <button className="del-btn" onClick={() => removeItem(item.id)}>X</button>
+                            <button className="del-btn" onClick={() => removeItem(item.id)}>刪除</button>
                         </div>
                     ))}
                     
