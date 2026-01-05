@@ -537,26 +537,30 @@ app.get("/api/my-history", requireAuth, async (req, res) => {
 });
 
 app.post("/api/admin/login", (req, res) => {
-    const { username, password } = req.body;
+    try {
+        const { username, password } = req.body;
 
-    // 簡單的比對環境變數中的帳密
-    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-        const payload = { role: 'admin', username: 'admin' };
-        const dataBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
-        const signature = crypto.createHmac('sha256', SECRET_KEY).update(dataBase64).digest('hex');
-        const token = `${dataBase64}.${signature}`;
+        if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+            const payload = { role: 'admin', username: 'admin' };
+            const dataBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
+            const signature = crypto.createHmac('sha256', SECRET_KEY).update(dataBase64).digest('hex');
+            const token = `${dataBase64}.${signature}`;
 
-        res.cookie("auth_token", token, {
-            httpOnly: true,
-            maxAge: 86400000,
-            path: "/",
-            secure: isProduction,
-            sameSite: isProduction ? "None" : "Lax"
-        });
-        return res.json({ message: "管理員登入成功", success: true });
+            res.cookie("auth_token", token, {
+                httpOnly: true,
+                maxAge: 86400000,
+                path: "/",
+                secure: isProduction,
+                sameSite: isProduction ? "None" : "Lax"
+            });
+            return res.json({ message: "管理員登入成功", success: true });
+        }
+        
+        return res.status(401).json({ message: "帳號或密碼錯誤", success: false });
+    } catch (err) {
+        console.error("Admin Login Error:", err);
+        return res.status(500).json({ message: "伺服器錯誤", error: err.message });
     }
-    
-    return res.status(401).json({ message: "帳號或密碼錯誤", success: false });
 });
 
 
