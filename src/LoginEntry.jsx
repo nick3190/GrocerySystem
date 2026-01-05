@@ -123,7 +123,7 @@ function LoginEntry() {
                 console.log("Easter egg sequence detected! Hold for 5 seconds...");
                 timer = setTimeout(() => {
                     // ⭐ 請將 '/owner' 替換為您真正的後台路徑
-                    navigate('/owner'); 
+                    navigate('/ownerlogin'); 
                 }, 5000);
             }
         };

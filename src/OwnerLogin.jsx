@@ -50,6 +50,8 @@ function Owner() {
     const [expandedUserHistory, setExpandedUserHistory] = useState(null);
     const [expandedHistoryOrderId, setExpandedHistoryOrderId] = useState(null);
 
+    const [newBundle, setNewBundle] = useState({ title: '', image: '', filterType: 'category', filterValue: '' });
+
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
     const fetchData = useCallback(async () => {
@@ -59,7 +61,8 @@ function Owner() {
                 api.get("/products"),
                 api.get("/api/categories"),
                 api.get("/api/brands"),
-                api.get("/api/users")
+                api.get("/api/users"),
+                api.get("/api/bundles")
             ]);
             setOrders(ordRes.data || []);
             setRawProducts(prodRes.data || []);
@@ -84,6 +87,26 @@ function Owner() {
             if (res.data.success) setIsLoggedIn(true);
             else alert("帳號或密碼錯誤");
         } catch (err) { alert("登入失敗"); }
+    };
+
+    // --- 套組管理邏輯 ---
+    const handleCreateBundle = async () => {
+        if (!newBundle.title || !newBundle.filterValue) return alert("請填寫完整資訊");
+        try {
+            await api.post('/api/bundles', newBundle);
+            alert("套組已建立");
+            const res = await api.get("/api/bundles"); // 重整列表
+            setBundles(res.data);
+            setNewBundle({ title: '', image: '', filterType: 'category', filterValue: '' });
+        } catch (e) { alert("建立失敗"); }
+    };
+
+    const handleDeleteBundle = async (id) => {
+        if (!confirm("確定刪除此套組？")) return;
+        try {
+            await api.delete(`/api/bundles/${id}`);
+            setBundles(prev => prev.filter(b => b.id !== id));
+        } catch (e) { alert("刪除失敗"); }
     };
 
     // --- 訂單操作邏輯 ---
@@ -265,13 +288,13 @@ function Owner() {
         const groups = {};
         filtered.forEach(item => { if (!groups[item.name]) groups[item.name] = []; groups[item.name].push(item); });
 
-        let result = Object.keys(groups).map(name => ({ 
-            name, 
-            items: groups[name], 
+        let result = Object.keys(groups).map(name => ({
+            name,
+            items: groups[name],
             brand: groups[name][0].brand,
-            mainImg: groups[name][0].image || null 
+            mainImg: groups[name][0].image || null
         }));
-        
+
         if (sortBy === 'price_asc') result.sort((a, b) => (a.items[0].price_A || 0) - (b.items[0].price_A || 0));
         else if (sortBy === 'price_desc') result.sort((a, b) => (b.items[0].price_A || 0) - (a.items[0].price_A || 0));
 
@@ -652,12 +675,70 @@ function Owner() {
                     </div>
                 )}
 
+                {/* ⭐ 套組管理頁面 */}
+                {activeTab === "bundles" && (
+                    <div className="bundles-view">
+                        <header className="content-header"><h2>套組管理</h2></header>
+
+                        <div className="input-group" style={{ background: 'white', padding: '20px', borderRadius: '10px', marginBottom: '20px' }}>
+                            <h4>新增熱門套組</h4>
+                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                                <div>
+                                    <label>套組名稱</label>
+                                    <input value={newBundle.title} onChange={e => setNewBundle({ ...newBundle, title: e.target.value })} placeholder="例如：早餐店專用" />
+                                </div>
+                                <div>
+                                    <label>背景圖片 (檔名)</label>
+                                    <input value={newBundle.image} onChange={e => setNewBundle({ ...newBundle, image: e.target.value })} placeholder="bundle_breakfast.jpg" />
+                                </div>
+                                <div>
+                                    <label>篩選方式</label>
+                                    <select value={newBundle.filterType} onChange={e => setNewBundle({ ...newBundle, filterType: e.target.value })}>
+                                        <option value="category">主分類 (Category)</option>
+                                        <option value="search">關鍵字 (Search)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label>篩選值</label>
+                                    {newBundle.filterType === 'category' ? (
+                                        <select value={newBundle.filterValue} onChange={e => setNewBundle({ ...newBundle, filterValue: e.target.value })}>
+                                            <option value="">請選擇分類</option>
+                                            {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    ) : (
+                                        <input value={newBundle.filterValue} onChange={e => setNewBundle({ ...newBundle, filterValue: e.target.value })} placeholder="例如：辣椒" />
+                                    )}
+                                </div>
+                                <button className="filter-btn active-filter" onClick={handleCreateBundle}>新增</button>
+                            </div>
+                        </div>
+
+                        <div className="product-grid">
+                            {bundles.map(b => (
+                                <div key={b.id} className="bundle-card" style={{ height: 'auto', cursor: 'default' }}>
+                                    <div style={{ height: '120px', overflow: 'hidden' }}>
+                                        <img src={b.image ? `/images/${b.image}` : '/images/default.png'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImageError} />
+                                    </div>
+                                    <div style={{ padding: '10px' }}>
+                                        <h4>{b.title}</h4>
+                                        <p style={{ fontSize: '0.9rem', color: '#666' }}>
+                                            {b.filter_type === 'category' ? '分類：' : '關鍵字：'}
+                                            {b.filter_value}
+                                        </p>
+                                        <button className="btn-delete" style={{ width: '100%', marginTop: '10px' }} onClick={() => handleDeleteBundle(b.id)}>刪除套組</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {isEditModalOpen && editingVariant && (
                     <div className="modal-overlay">
                         <div className="modal-content">
                             {/* ⭐ 新增：後台 Modal 圖片 */}
                             <div className="modal-img-wrapper">
-                                <img 
+                                <img
                                     src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'}
                                     alt={editingVariant.name}
                                     className="modal-product-img"
