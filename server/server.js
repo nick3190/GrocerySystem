@@ -11,10 +11,13 @@ import twilio from 'twilio';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "password";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
-const SECRET_KEY = process.env.SECRET_KEY || "YOUR_FALLBACK_SECRET_KEY"; 
+const SECRET_KEY = process.env.SECRET_KEY || "YOUR_FALLBACK_SECRET_KEY";
 const distPath = path.join(__dirname, "../dist");
 
 app.use(express.static(path.join(distPath)));
@@ -34,7 +37,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 const formatPhone = (rawPhone) => {
     if (!rawPhone) return null;
     let p = rawPhone.toString().replace(/\s+/g, '').replace(/-/g, '');
-    
+
     // 處理 +886 開頭
     if (p.startsWith('+886')) {
         // 如果是 +88609... 轉為 +8869...
@@ -95,10 +98,10 @@ const requireAuth = (req, res, next) => {
 
 app.use(cors({
     origin: isProduction
-        ? ["https://grocerysystem-s04n.onrender.com"] 
-        : ["http://localhost:5173", "http://127.0.0.1:5173"], 
+        ? ["https://grocerysystem-s04n.onrender.com"]
+        : ["http://localhost:5173", "http://127.0.0.1:5173"],
     methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true 
+    credentials: true
 }));
 
 app.use(express.json());
@@ -112,11 +115,11 @@ app.use(cookieParser());
 app.post("/api/send-otp", async (req, res) => {
     let { phone } = req.body;
     const formattedPhone = formatPhone(phone);
-    
+
     if (!formattedPhone) return res.status(400).json({ message: "手機號碼格式錯誤" });
 
     const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); 
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
     try {
         await pool.query(
@@ -202,7 +205,7 @@ app.post("/api/verify-otp", async (req, res) => {
         const token = `${dataBase64}.${signature}`;
 
         await pool.query('DELETE FROM otps WHERE phone = $1', [formattedPhone]);
-        
+
         res.cookie("auth_token", token, {
             httpOnly: true,
             maxAge: 86400000,
@@ -382,16 +385,16 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         `;
 
         await pool.query(insertSql, [
-            newOrderId, 
-            user.uuid, 
-            dbUser.store_name, 
-            dbUser.phone,      
-            dbUser.address, 
-            dbUser.delivery_type, 
-            dbUser.pickup_date, 
+            newOrderId,
+            user.uuid,
+            dbUser.store_name,
+            dbUser.phone,
+            dbUser.address,
+            dbUser.delivery_type,
+            dbUser.pickup_date,
             dbUser.pickup_time,
-            JSON.stringify(itemsJson), 
-            total,           
+            JSON.stringify(itemsJson),
+            total,
             orderNote
         ]);
 
@@ -416,18 +419,30 @@ app.get("/history", async (req, res) => {
             rawTime: row.created_at,
             pickupDate: row.pickup_date,
             pickupTime: row.pickup_time,
-            // ⭐ 新增: 回傳 pickup_type 讓前端篩選
-            pickupType: row.pickup_type, 
+            pickupType: row.pickup_type,
             storeName: row.receiver_name,
             total: row.total_amount,
             products: row.items,
             isPrinted: row.is_printed || false,
-            user_uuid: row.user_uuid 
+            user_uuid: row.user_uuid,
+            status: row.status || 'pending' // ⭐ 新增：回傳狀態 (預設 pending)
         }));
         res.json(formatted);
-    } catch (err) { 
+    } catch (err) {
         console.error("讀取歷史訂單失敗:", err);
-        res.status(500).json([]); 
+        res.status(500).json([]);
+    }
+});
+
+// ⭐ 新增：將訂單標記為完成
+app.put("/api/orders/:id/complete", async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query("UPDATE orders SET status = 'completed' WHERE order_id = $1", [id]);
+        res.json({ message: "訂單已完成" });
+    } catch (err) {
+        console.error("更新訂單狀態失敗:", err);
+        res.status(500).json({ message: "更新失敗" });
     }
 });
 
@@ -480,12 +495,12 @@ app.get("/api/orders/:id/print", async (req, res) => {
             sheet.insertRow(4, [`地址: ${order.address}`]);
         }
         sheet.insertRow(5, [`顧客整單備註: ${order.order_note || '無'}`]);
-        sheet.insertRow(6, ['']); 
+        sheet.insertRow(6, ['']);
 
         sheet.getRow(7).values = ['商品名稱', '數量', '單價', '商品備註', '小計'];
         sheet.getRow(7).font = { bold: true };
 
-        const products = order.items || []; 
+        const products = order.items || [];
         let totalAmount = 0;
         products.forEach(p => {
             const sub = Number(p.price) * Number(p.qty);
@@ -555,7 +570,7 @@ app.post("/api/admin/login", (req, res) => {
             });
             return res.json({ message: "管理員登入成功", success: true });
         }
-        
+
         return res.status(401).json({ message: "帳號或密碼錯誤", success: false });
     } catch (err) {
         console.error("Admin Login Error:", err);
