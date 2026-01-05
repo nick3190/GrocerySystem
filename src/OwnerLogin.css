@@ -311,3 +311,26 @@
     transform: translateY(-5px);
     box-shadow: var(--shadow);
 }
+
+/* 新增：篩選按鈕樣式 */
+.filter-btn {
+    padding: 8px 16px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #666;
+    transition: 0.2s;
+}
+
+.filter-btn:hover {
+    background: #f5f5f5;
+}
+
+.filter-btn.active-filter {
+    background: var(--primary); /* 或您主題色 */
+    color: white;
+    border-color: var(--primary);
+    font-weight: bold;
+}
