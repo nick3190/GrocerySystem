@@ -12,28 +12,29 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// ⭐ 1. 關鍵修正：將環境變數宣告移至最上方，確保全域可用
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const SECRET_KEY = process.env.SECRET_KEY;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// 信任 Proxy (解決 Render 上的 Rate Limit 錯誤)
 app.set('trust proxy', 1);
 
 const distPath = path.join(__dirname, "../dist");
-
 app.use(express.static(path.join(distPath)));
 
 let twilioClient;
 if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
     twilioClient = new twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-} else {
-    console.warn("⚠️ 未偵測到 Twilio 環境變數，簡訊功能可能無法使用");
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
 
 // --- 工具函式 ---
-
-// 1. 標準化手機號碼
 const formatPhone = (rawPhone) => {
     if (!rawPhone) return null;
     let p = rawPhone.toString().replace(/\s+/g, '').replace(/-/g, '');
@@ -45,13 +46,10 @@ const formatPhone = (rawPhone) => {
         if (p.startsWith('88609')) return '+886' + p.substring(4);
         return '+' + p;
     }
-    if (p.startsWith('09')) {
-        return '+886' + p.substring(1);
-    }
+    if (p.startsWith('09')) return '+886' + p.substring(1);
     return p;
 };
 
-// 2. 產生訂單編號
 const generateOrderId = () => {
     const now = new Date();
     const dateStr = now.toISOString().replace(/[-T:.Z]/g, "").slice(0, 12);
@@ -59,12 +57,14 @@ const generateOrderId = () => {
     return `${dateStr}${random}`;
 };
 
-// 3. JWT 驗證
+// --- JWT 驗證 ---
 const verifyToken = (req) => {
     const token = req.cookies.auth_token;
     if (!token) return null;
     try {
         const [dataBase64, signature] = token.split('.');
+        if (!dataBase64 || !signature) return null;
+        
         const newSignature = crypto.createHmac('sha256', SECRET_KEY).update(dataBase64).digest('hex');
         if (newSignature === signature) {
             return JSON.parse(Buffer.from(dataBase64, 'base64').toString());
@@ -73,15 +73,16 @@ const verifyToken = (req) => {
     return null;
 };
 
-// Middleware
 const requireAuth = (req, res, next) => {
     const user = verifyToken(req);
+    // 開發後門 (Render 上不會執行)
     if (!isProduction && !user) {
-        // 開發模式模擬
         req.user = { uuid: "DEV-UUID", priceTier: "A", store_name: "開發測試店", phone: "0900000000" };
         return next();
     }
-    if (!user) return res.status(401).json({ message: "請先登入" });
+    if (!user) {
+        return res.status(401).json({ message: "Token 無效或已過期" });
+    }
     req.user = user;
     next();
 };
@@ -99,7 +100,7 @@ app.use(cookieParser());
 
 const otpLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, 
-    max: 10, // 放寬一點避免測試時卡住
+    max: 10, 
     message: { message: "簡訊發送過於頻繁" }
 });
 
@@ -114,9 +115,7 @@ app.use('/api', limiter);
 
 // ================= API 路由 =================
 
-// --- 1. 登入與使用者相關 ---
-
-// ⭐ 新增：透過手機查詢使用者 (Auto-fill 用)
+// 手機自動帶入資料 API
 app.get("/api/lookup-user", async (req, res) => {
     const { phone } = req.query;
     const formatted = formatPhone(phone);
@@ -126,7 +125,6 @@ app.get("/api/lookup-user", async (req, res) => {
         const result = await pool.query("SELECT * FROM users WHERE phone = $1", [formatted]);
         if (result.rows.length > 0) {
             const u = result.rows[0];
-            // 回傳需要的欄位即可
             res.json({
                 found: true,
                 user: {
@@ -139,7 +137,6 @@ app.get("/api/lookup-user", async (req, res) => {
             res.json({ found: false });
         }
     } catch (e) {
-        console.error(e);
         res.status(500).json({ found: false });
     }
 });
@@ -171,6 +168,7 @@ app.post("/api/send-otp", otpLimiter, async (req, res) => {
             res.json({ message: "驗證碼已發送 (開發模式)" });
         }
     } catch (err) {
+        console.error("Send OTP Error:", err);
         res.status(500).json({ message: "系統錯誤" });
     }
 });
@@ -188,8 +186,12 @@ app.post("/api/verify-otp", async (req, res) => {
         if (record.code !== otp) return res.status(400).json({ message: "驗證碼錯誤" });
 
         let finalDate = pickupDate === 'today' ? moment().format('YYYY-MM-DD') : pickupDate;
-        const finalTime = deliveryType === 'delivery' ? '' : pickupTime;
-        const sqlParams = [storeName, formattedPhone, deliveryType, address, finalDate, finalTime];
+        if (!finalDate) finalDate = null; 
+
+        const finalTime = (deliveryType === 'delivery' || !pickupTime) ? null : pickupTime;
+        const safeAddress = address || '';
+
+        const sqlParams = [storeName, formattedPhone, deliveryType, safeAddress, finalDate, finalTime];
 
         let userResult = await pool.query('SELECT * FROM users WHERE phone = $1', [formattedPhone]);
 
@@ -233,19 +235,19 @@ app.post("/api/verify-otp", async (req, res) => {
 
         res.json({ message: "登入成功", user: payload });
     } catch (err) {
-        res.status(500).json({ message: "登入失敗" });
+        console.error("Login Error (500):", err);
+        res.status(500).json({ message: "登入失敗 (伺服器錯誤)" });
     }
 });
 
-// ⭐ 修正：回傳資料庫最新資料，並轉為 camelCase 以便前端購物車讀取
 app.get("/api/me", requireAuth, async (req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    
     const user = req.user;
     try {
         const userRes = await pool.query('SELECT * FROM users WHERE uuid = $1', [user.uuid]);
         if (userRes.rows.length > 0) {
             const u = userRes.rows[0];
-            // 轉換為前端習慣的 camelCase
             const userData = {
                 ...u,
                 deliveryType: u.delivery_type,
@@ -288,12 +290,8 @@ app.put("/products/:id", async (req, res) => {
     } catch (err) { res.status(500).json({ message: "Error" }); }
 });
 
-app.get("/api/categories", async (req, res) => { /* ...省略(未變動)... */ 
-    try { const result = await pool.query('SELECT DISTINCT main_category, sub_category FROM products'); const map = {}; result.rows.forEach(row => { const main = row.main_category || '其他'; const sub = row.sub_category || '其他'; if (!map[main]) map[main] = []; if (!map[main].includes(sub)) map[main].push(sub); }); res.json(map); } catch (err) { res.status(500).json({}); }
-});
-app.get("/api/brands", async (req, res) => { /* ...省略(未變動)... */ 
-    try { const result = await pool.query("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != ''"); res.json(result.rows.map(r => r.brand)); } catch (err) { res.json([]); }
-});
+app.get("/api/categories", async (req, res) => { try { const result = await pool.query('SELECT DISTINCT main_category, sub_category FROM products'); const map = {}; result.rows.forEach(row => { const main = row.main_category || '其他'; const sub = row.sub_category || '其他'; if (!map[main]) map[main] = []; if (!map[main].includes(sub)) map[main].push(sub); }); res.json(map); } catch (err) { res.status(500).json({}); } });
+app.get("/api/brands", async (req, res) => { try { const result = await pool.query("SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL AND brand != ''"); res.json(result.rows.map(r => r.brand)); } catch (err) { res.json([]); } });
 
 app.get("/cart", requireAuth, async (req, res) => {
     const user = req.user;
@@ -329,10 +327,15 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
     try {
         const userRes = await pool.query("SELECT * FROM users WHERE uuid = $1", [user.uuid]);
         const dbUser = userRes.rows[0];
+        
         const finalDeliveryType = deliveryType || dbUser.delivery_type;
         const finalAddress = address || dbUser.address;
-        const finalPickupDate = pickupDate || dbUser.pickup_date;
-        const finalPickupTime = pickupTime || dbUser.pickup_time;
+        
+        let finalPickupDate = pickupDate || dbUser.pickup_date;
+        if (!finalPickupDate) finalPickupDate = null;
+        
+        let finalPickupTime = pickupTime || dbUser.pickup_time;
+        if (!finalPickupTime) finalPickupTime = null;
 
         const cartRes = await pool.query(`SELECT c.*, p.name, p."price_A", p."price_B" FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1`, [user.uuid]);
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "Empty" });
@@ -348,11 +351,13 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         );
         await pool.query("DELETE FROM cart_items WHERE user_uuid = $1", [user.uuid]);
         res.json({ message: "Order Sent", orderId: newOrderId });
-    } catch (err) { res.status(500).json({ message: "Error" }); }
+    } catch (err) { 
+        console.error("Checkout Error:", err);
+        res.status(500).json({ message: "Error" }); 
+    }
 });
 
 // --- 後台管理 API ---
-
 app.get("/history", async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
@@ -375,7 +380,6 @@ app.get("/history", async (req, res) => {
     } catch (err) { res.status(500).json([]); }
 });
 
-// ⭐ 新增：編輯訂單 API (修改內容與總價)
 app.put("/api/orders/:id", async (req, res) => {
     const { id } = req.params;
     const { items, total, order_note } = req.body;
@@ -385,10 +389,7 @@ app.put("/api/orders/:id", async (req, res) => {
             [JSON.stringify(items), total, order_note, id]
         );
         res.json({ message: "訂單已更新" });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "更新失敗" });
-    }
+    } catch (err) { res.status(500).json({ message: "更新失敗" }); }
 });
 
 app.put("/api/orders/:id/confirm", async (req, res) => {
@@ -419,7 +420,7 @@ app.get("/api/users", async (req, res) => {
     } catch (err) { res.status(500).json([]); }
 });
 
-app.get("/api/orders/:id/print", async (req, res) => { /* ...省略(保持不變，或直接複製您之前的)... */ 
+app.get("/api/orders/:id/print", async (req, res) => {
     const { id } = req.params; try { const orderRes = await pool.query("SELECT * FROM orders WHERE order_id = $1", [id]); if (orderRes.rows.length === 0) return res.status(404).send("無此訂單"); const order = orderRes.rows[0]; await pool.query("UPDATE orders SET is_printed = TRUE WHERE order_id = $1", [id]); const workbook = new ExcelJS.Workbook(); const sheet = workbook.addWorksheet('訂單明細'); sheet.columns = [{ header: '商品名稱', key: 'name', width: 30 }, { header: '數量', key: 'qty', width: 10 }, { header: '單價', key: 'price', width: 15 }, { header: '備註', key: 'note', width: 20 }, { header: '小計', key: 'subtotal', width: 15 }]; sheet.insertRow(1, [`訂單編號: ${order.order_id}`, `店家: ${order.receiver_name}`]); sheet.insertRow(2, [`電話: ${order.receiver_phone}`]); const typeStr = order.pickup_type === 'self' ? '自取' : '外送'; sheet.insertRow(3, [`方式: ${typeStr}`, `日期: ${order.pickup_date}`, `時段: ${order.pickup_time || '無'}`]); if (order.pickup_type === 'delivery') { sheet.insertRow(4, [`地址: ${order.address}`]); } sheet.insertRow(5, [`顧客整單備註: ${order.order_note || '無'}`]); sheet.insertRow(6, ['']); sheet.getRow(7).values = ['商品名稱', '數量', '單價', '商品備註', '小計']; sheet.getRow(7).font = { bold: true }; const products = order.items || []; let totalAmount = 0; products.forEach(p => { const sub = Number(p.price) * Number(p.qty); totalAmount += sub; sheet.addRow([p.name, p.qty, p.price, p.note, sub]); }); sheet.addRow(['', '', '', '總金額', totalAmount]); res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.setHeader('Content-Disposition', `attachment; filename=order-${id}.xlsx`); await workbook.xlsx.write(res); res.end(); } catch (err) { res.status(500).send("列印失敗"); }
 });
 
@@ -448,6 +449,7 @@ app.get("/api/my-history", requireAuth, async (req, res) => {
 app.post("/api/admin/login", (req, res) => {
     try {
         const { username, password } = req.body;
+        // ⭐ 這裡會讀取最上方已定義的 ADMIN_USERNAME
         if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
             const payload = { role: 'admin', username: 'admin' };
             const dataBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');
@@ -457,7 +459,10 @@ app.post("/api/admin/login", (req, res) => {
             return res.json({ message: "管理員登入成功", success: true });
         }
         return res.status(401).json({ message: "帳號或密碼錯誤", success: false });
-    } catch (err) { res.status(500).json({ message: "伺服器錯誤", error: err.message }); }
+    } catch (err) { 
+        console.error("Admin Login Error:", err);
+        res.status(500).json({ message: "伺服器錯誤", error: err.message }); 
+    }
 });
 
 app.use((req, res, next) => {
