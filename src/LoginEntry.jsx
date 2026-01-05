@@ -6,9 +6,8 @@ import './LoginEntry.css';
 function LoginEntry() {
     const navigate = useNavigate();
     const [step, setStep] = useState(1);
-    const [activeTab, setActiveTab] = useState('self'); // 'self' | 'delivery'
+    const [activeTab, setActiveTab] = useState('self'); 
     const [isLoading, setIsLoading] = useState(false);
-
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
     const [redirectMsg, setRedirectMsg] = useState(null);
 
@@ -21,7 +20,7 @@ function LoginEntry() {
     });
 
     // 自取專用狀態
-    const [pickupDateType, setPickupDateType] = useState('today'); // 'today' | 'custom'
+    const [pickupDateType, setPickupDateType] = useState('today'); 
     const [customDate, setCustomDate] = useState('');
     const [pickupTime, setPickupTime] = useState('');
 
@@ -29,14 +28,30 @@ function LoginEntry() {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
+    // ⭐ 新增：手機欄位失焦時自動查詢
+    const handlePhoneBlur = async () => {
+        if (!formData.phone || formData.phone.length < 9) return;
+        try {
+            const res = await api.get(`/api/lookup-user?phone=${formData.phone}`);
+            if (res.data.found) {
+                const u = res.data.user;
+                // 自動帶入資料
+                setFormData(prev => ({
+                    ...prev,
+                    storeName: u.storeName || '',
+                    address: u.address || ''
+                }));
+                if (u.deliveryType) {
+                    setActiveTab(u.deliveryType);
+                }
+            }
+        } catch (e) { console.error("Lookup failed", e); }
+    };
+
     const handleSendOTP = async () => {
         if (!formData.storeName || !formData.phone) return alert("請填寫店家名稱與手機");
-
-        // 驗證邏輯
-        if (activeTab === 'delivery') {
-            if (!formData.address) return alert("外送請填寫地址");
-        } else {
-            // 自取驗證
+        if (activeTab === 'delivery' && !formData.address) return alert("外送請填寫地址");
+        if (activeTab === 'self') {
             if (pickupDateType === 'custom' && !customDate) return alert("請選擇取貨日期");
             if (!pickupTime) return alert("請選擇取貨時段");
         }
@@ -57,21 +72,19 @@ function LoginEntry() {
         if (!formData.otp) return alert("請輸入驗證碼");
         setIsLoading(true);
         try {
-            // 處理日期：如果是 "today"，轉換成 YYYY-MM-DD
             let finalDate = pickupDateType === 'today'
-                ? new Date().toISOString().split('T')[0] // 取得今日日期 YYYY-MM-DD
+                ? new Date().toISOString().split('T')[0]
                 : customDate;
 
             const payload = {
                 ...formData,
                 deliveryType: activeTab,
-                pickupDate: finalDate, // 傳送處理過的日期
+                pickupDate: finalDate,
                 pickupTime: activeTab === 'self' ? pickupTime : ''
             };
 
             const res = await api.post('/api/verify-otp', payload);
-            console.log("登入成功:", res.data);
-            navigate('/productList'); // 導向商品頁
+            navigate('/productList'); 
         } catch (error) {
             alert(error.response?.data?.message || "驗證失敗");
         } finally {
@@ -82,21 +95,14 @@ function LoginEntry() {
     useEffect(() => {
         const checkLoginStatus = async () => {
             try {
-                // 這裡會呼叫後端 (現在後端有 requireAuth，無效會直接拋出 401)
                 const res = await api.get('/api/me');
-
                 if (res.data && res.data.isAuthenticated) {
-                    // 顯示跳轉訊息，給使用者 1.5 秒的反應時間 (避免瞬間跳轉卡死)
                     setRedirectMsg(`歡迎回來 ${res.data.user.store_name}，正在進入賣場...`);
-                    setTimeout(() => {
-                        navigate('/productList');
-                    }, 3500);
+                    setTimeout(() => { navigate('/productList'); }, 3500);
                 } else {
-                    // 有回應但 isAuthenticated 為 false (理論上不會發生，因為會 401)
                     setIsCheckingAuth(false);
                 }
             } catch (err) {
-                // 收到 401 或其他錯誤 -> 停留在登入頁
                 console.log("尚未登入或 Token 已失效");
                 setIsCheckingAuth(false);
             }
@@ -105,10 +111,7 @@ function LoginEntry() {
     }, [navigate]);
 
     const forceLogout = async () => {
-        try {
-            await api.post('/logout'); // 呼叫後端清除 Cookie
-        } catch (e) { console.error(e); }
-        // 前端強制重整頁面，確保狀態清空
+        try { await api.post('/logout'); } catch (e) { }
         window.location.reload();
     };
 
@@ -116,30 +119,8 @@ function LoginEntry() {
         return (
             <div className="page-wrapper">
                 <div className="centered-box" style={{ padding: '40px' }}>
-                    {redirectMsg ? (
-                        <>
-                            <h3 style={{ color: '#2ecc71', marginBottom: '20px' }}>✅ {redirectMsg}</h3>
-                            <p>如果沒有自動跳轉...</p>
-                        </>
-                    ) : (
-                        <h3>⏳ 正在確認登入狀態...</h3>
-                    )}
-
-                    {/* 這就是逃生門按鈕 */}
-                    <button
-                        onClick={forceLogout}
-                        style={{
-                            marginTop: '20px',
-                            padding: '10px 20px',
-                            background: '#95a5a6',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        並非此帳號 / 強制登出
-                    </button>
+                    {redirectMsg ? <h3 style={{ color: '#2ecc71' }}>✅ {redirectMsg}</h3> : <h3>⏳ 正在確認登入狀態...</h3>}
+                    <button onClick={forceLogout} style={{ marginTop: '20px', padding: '10px', background: '#95a5a6', color: 'white', border:'none', borderRadius:'5px' }}>強制登出</button>
                 </div>
             </div>
         );
@@ -160,30 +141,31 @@ function LoginEntry() {
                 <div className="form-content">
                     {step === 1 ? (
                         <>
+                            {/* ⭐ 手機移到最上方，並加入 onBlur */}
+                            <input 
+                                name="phone" 
+                                placeholder="手機號碼 (輸入後自動帶入資料)" 
+                                value={formData.phone} 
+                                onChange={handleInputChange} 
+                                onBlur={handlePhoneBlur}
+                                className="main-input" 
+                            />
                             <input name="storeName" placeholder="店家名稱" value={formData.storeName} onChange={handleInputChange} className="main-input" />
-                            <input name="phone" placeholder="手機號碼" value={formData.phone} onChange={handleInputChange} className="main-input" />
 
-                            {/* 外送介面 */}
                             {activeTab === 'delivery' && (
                                 <input name="address" placeholder="送貨地址" value={formData.address} onChange={handleInputChange} className="main-input" />
                             )}
 
-                            {/* 自取介面 */}
                             {activeTab === 'self' && (
                                 <div className="self-pickup-options" style={{ textAlign: 'left' }}>
                                     <p>選擇日期：</p>
                                     <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                                        <label>
-                                            <input type="radio" name="dateType" checked={pickupDateType === 'today'} onChange={() => setPickupDateType('today')} /> 今日取貨
-                                        </label>
-                                        <label>
-                                            <input type="radio" name="dateType" checked={pickupDateType === 'custom'} onChange={() => setPickupDateType('custom')} /> 指定日期
-                                        </label>
+                                        <label><input type="radio" name="dateType" checked={pickupDateType === 'today'} onChange={() => setPickupDateType('today')} /> 今日取貨</label>
+                                        <label><input type="radio" name="dateType" checked={pickupDateType === 'custom'} onChange={() => setPickupDateType('custom')} /> 指定日期</label>
                                     </div>
                                     {pickupDateType === 'custom' && (
                                         <input type="date" className="main-input" value={customDate} onChange={(e) => setCustomDate(e.target.value)} />
                                     )}
-
                                     <p style={{ marginTop: '10px' }}>選擇時段：</p>
                                     <select className="main-input" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}>
                                         <option value="">請選擇時段</option>

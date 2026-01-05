@@ -8,6 +8,9 @@ import {
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
+// ⭐ 1. 引入 fuse.js
+import Fuse from 'fuse.js';
+
 function Owner() {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [activeTab, setActiveTab] = useState("dashboard");
@@ -15,22 +18,25 @@ function Owner() {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
 
-    // --- 資料狀態 ---
+    // 資料狀態
     const [orders, setOrders] = useState([]);
     const [users, setUsers] = useState([]);
     const [rawProducts, setRawProducts] = useState([]);
 
-    // --- 訂單管理狀態 ---
-    const [orderSubTab, setOrderSubTab] = useState("today"); // 'today', 'future', 'all'
-    const [filterType, setFilterType] = useState("all"); // 'all', 'self', 'delivery'
+    // 訂單管理
+    const [orderSubTab, setOrderSubTab] = useState("today");
+    const [filterType, setFilterType] = useState("all");
     const [expandedOrderId, setExpandedOrderId] = useState(null);
-    // 暫存外送訂單的日期輸入 { orderId: '2023-10-20' }
     const [pendingDates, setPendingDates] = useState({});
+    
+    // 訂單編輯
+    const [editingOrder, setEditingOrder] = useState(null);
 
-    // --- 商品管理狀態 ---
+    // 商品管理
     const [categoriesMap, setCategoriesMap] = useState({});
     const [brands, setBrands] = useState([]);
-    const [searchText, setSearchText] = useState('');
+    const [searchInput, setSearchInput] = useState('');
+    const [activeSearch, setActiveSearch] = useState('');
     const [selectedParent, setSelectedParent] = useState('全部');
     const [selectedChild, setSelectedChild] = useState('全部');
     const [selectedBrand, setSelectedBrand] = useState('全部');
@@ -38,14 +44,17 @@ function Owner() {
     const [prodPage, setProdPage] = useState(1);
     const prodPageSize = 12;
 
-    // --- 商品修改 Modal 狀態 ---
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editingGroup, setEditingGroup] = useState([]);
     const [editingVariant, setEditingVariant] = useState(null);
 
+    // 使用者歷史訂單展開狀態
+    const [expandedUserHistory, setExpandedUserHistory] = useState(null);
+    // 歷史訂單中，哪一筆訂單被展開詳細內容
+    const [expandedHistoryOrderId, setExpandedHistoryOrderId] = useState(null);
+
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
-    // --- 核心：資料讀取 (包含自動更新) ---
     const fetchData = useCallback(async () => {
         try {
             const [ordRes, prodRes, catRes, brandRes, userRes] = await Promise.all([
@@ -60,166 +69,166 @@ function Owner() {
             setCategoriesMap(catRes.data || {});
             setBrands(brandRes.data || []);
             setUsers(userRes.data || []);
-        } catch (err) {
-            console.error("資料載入失敗", err);
-        }
+        } catch (err) { console.error(err); }
     }, []);
 
     useEffect(() => {
         if (isLoggedIn) {
             fetchData();
-            // 每 30 秒自動更新一次
             const interval = setInterval(fetchData, 30000);
             return () => clearInterval(interval);
         }
     }, [isLoggedIn, fetchData]);
 
-    // --- 登入處理 ---
     const handleLogin = async (e) => {
         e.preventDefault();
         try {
             const res = await api.post('/api/admin/login', { username, password });
-            if (res.data.success) {
-                setIsLoggedIn(true);
-            } else {
-                alert("帳號或密碼錯誤");
-            }
-        } catch (err) {
-            console.error(err);
-            alert("登入失敗 (請檢查後端連線)");
-        }
+            if (res.data.success) setIsLoggedIn(true);
+            else alert("帳號或密碼錯誤");
+        } catch (err) { alert("登入失敗"); }
     };
 
     // --- 訂單操作邏輯 ---
-
-    // 1. 確認待審訂單 (Pending Review -> Pending)
     const confirmPendingOrder = async (order) => {
         const isDelivery = order.pickupType === 'delivery';
         let payload = {};
-
         if (isDelivery) {
             const date = pendingDates[order.id];
             if (!date) return alert("請為送貨訂單設定出貨日期");
             payload.pickupDate = date;
         }
-
         if (!window.confirm(`確定接收此訂單？${isDelivery ? `(出貨日: ${payload.pickupDate})` : ''}`)) return;
-
+        
         try {
             await api.put(`/api/orders/${order.id}/confirm`, payload);
-            alert("訂單已確認，已移至下方列表");
-
-            // 更新本地狀態
-            setOrders(prev => prev.map(o =>
-                o.id === order.id
-                    ? {
-                        ...o,
-                        status: 'pending',
-                        // 如果有更新日期，也要同步更新本地資料
-                        ...(payload.pickupDate && { pickupDate: payload.pickupDate })
-                    }
+            alert("訂單已確認");
+            setOrders(prev => prev.map(o => 
+                o.id === order.id 
+                    ? { ...o, status: 'pending', ...(payload.pickupDate && { pickupDate: payload.pickupDate }) } 
                     : o
             ));
-
-            // 清除暫存日期
             const newPendingDates = { ...pendingDates };
             delete newPendingDates[order.id];
             setPendingDates(newPendingDates);
-
-        } catch (e) {
-            alert("確認失敗，請稍後再試");
-        }
+        } catch (e) { alert("確認失敗"); }
     };
 
-    // 2. 完成訂單 (Pending -> Completed)
     const completeOrder = async (id) => {
         if (!window.confirm("確定標記為已完成？")) return;
         try {
             await api.put(`/api/orders/${id}/complete`);
             setOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'completed' } : o));
-        } catch (e) {
-            alert("更新失敗");
-        }
+        } catch (e) { alert("更新失敗"); }
     };
 
-    // 3. 切換明細顯示
-    const toggleOrder = (id) => setExpandedOrderId(expandedOrderId === id ? null : id);
+    const deleteOrder = async (id) => {
+        if (!window.confirm("⚠️ 確定要永久刪除此訂單嗎？此操作無法復原。")) return;
+        try {
+            await api.delete(`/history/${id}`);
+            setOrders(prev => prev.filter(o => o.id !== id));
+            alert("訂單已刪除");
+        } catch (e) { alert("刪除失敗"); }
+    };
 
-    // 4. 列印訂單
+    // --- 訂單編輯功能 ---
+    const startEditOrder = (order) => {
+        setEditingOrder(JSON.parse(JSON.stringify(order))); // Deep copy
+    };
+
+    const saveOrderEdit = async () => {
+        if (!editingOrder) return;
+        if (!window.confirm("確定儲存修改？")) return;
+
+        const newTotal = editingOrder.products.reduce((sum, p) => sum + (Number(p.price) * Number(p.qty)), 0);
+        
+        try {
+            await api.put(`/api/orders/${editingOrder.id}`, {
+                items: editingOrder.products,
+                total: newTotal,
+                order_note: editingOrder.order_note
+            });
+            
+            setOrders(prev => prev.map(o => o.id === editingOrder.id ? { ...editingOrder, total: newTotal } : o));
+            setEditingOrder(null);
+            alert("修改成功");
+        } catch (e) { alert("修改失敗"); }
+    };
+
+    const handleEditItemQty = (index, delta) => {
+        setEditingOrder(prev => {
+            const newProducts = [...prev.products];
+            const item = newProducts[index];
+            const newQty = Math.max(0, Number(item.qty) + delta);
+            
+            if (newQty === 0) {
+                if(window.confirm("數量為 0 將移除此商品，確定嗎？")) {
+                    newProducts.splice(index, 1);
+                }
+            } else {
+                newProducts[index] = { ...item, qty: newQty };
+            }
+            return { ...prev, products: newProducts };
+        });
+    };
+
+    const toggleOrder = (id) => setExpandedOrderId(expandedOrderId === id ? null : id);
     const printOrder = async (id) => {
         const baseUrl = api.defaults.baseURL || 'http://localhost:4000';
         window.open(`${baseUrl}/api/orders/${id}/print`, '_blank');
         setOrders(prev => prev.map(o => o.id === id ? { ...o, isPrinted: true } : o));
     };
 
-    // --- 資料分流 (待審 vs 正式列表) ---
-    const pendingReviewOrders = useMemo(() => {
-        return orders.filter(o => o.status === 'pending_review');
-    }, [orders]);
+    // --- 資料分流 ---
+    const pendingReviewOrders = useMemo(() => orders.filter(o => o.status === 'pending_review'), [orders]);
+    const mainListOrders = useMemo(() => orders.filter(o => o.status === 'pending' || o.status === 'completed'), [orders]);
 
-    const mainListOrders = useMemo(() => {
-        // 只顯示 'pending' (處理中) 和 'completed' (已完成)
-        return orders.filter(o => o.status === 'pending' || o.status === 'completed');
-    }, [orders]);
-
-    // --- 正式列表篩選邏輯 ---
-    const filteredMainOrders = useMemo(() => {
+    // --- 訂單篩選 ---
+    const { activeOrders, completedOrders } = useMemo(() => {
         const todayStr = moment().format('YYYY-MM-DD');
         let res = mainListOrders;
 
-        // 日期篩選
-        if (orderSubTab === 'today') {
-            res = res.filter(o => o.pickupDate === todayStr);
-        } else if (orderSubTab === 'future') {
-            res = res.filter(o => o.pickupDate > todayStr);
-        }
+        if (orderSubTab === 'today') res = res.filter(o => o.pickupDate === todayStr);
+        else if (orderSubTab === 'future') res = res.filter(o => o.pickupDate > todayStr);
 
-        // 類型篩選
-        if (filterType === 'self') {
-            res = res.filter(o => o.pickupType === 'self');
-        } else if (filterType === 'delivery') {
-            res = res.filter(o => o.pickupType === 'delivery');
-        }
+        if (filterType === 'self') res = res.filter(o => o.pickupType === 'self');
+        else if (filterType === 'delivery') res = res.filter(o => o.pickupType === 'delivery');
 
-        return res;
+        const active = res.filter(o => o.status !== 'completed');
+        const completed = res.filter(o => o.status === 'completed');
+
+        return { activeOrders: active, completedOrders: completed };
     }, [mainListOrders, orderSubTab, filterType]);
 
-    // --- 數據統計邏輯 ---
+    // --- 數據統計 ---
     const { stats, chartData } = useMemo(() => {
         const todayStr = moment().format('YYYY-MM-DD');
         const currentMonth = moment().format('YYYY-MM');
-
-        let pendingCount = 0;   // 待處理 (含待審與處理中)
-        let todayCompleted = 0; // 本日完成
-        let monthCompleted = 0; // 本月完成
-
+        let pendingCount = 0, todayCompleted = 0, monthCompleted = 0;
         const last7DaysMap = {};
-        for (let i = 6; i >= 0; i--) last7DaysMap[moment().subtract(i, 'days').format('MM/DD')] = 0;
+        for(let i=6; i>=0; i--) last7DaysMap[moment().subtract(i, 'days').format('MM/DD')] = 0;
         const productSalesMap = {};
         let selfCount = 0, deliveryCount = 0;
 
         orders.forEach(o => {
+            if (o.status === 'pending_review') return;
             const isCompleted = o.status === 'completed';
             const orderDateFull = moment(o.rawTime).format('YYYY-MM-DD');
             const orderMonth = moment(o.rawTime).format('YYYY-MM');
             const amount = Number(o.total || 0);
 
-            // 統計指標
             if (!isCompleted) pendingCount++;
             if (isCompleted && orderDateFull === todayStr) todayCompleted++;
             if (isCompleted && orderMonth === currentMonth) monthCompleted++;
 
-            // 圖表數據 (統計所有有效訂單)
             const orderDateKey = moment(o.rawTime).format('MM/DD');
             if (last7DaysMap[orderDateKey] !== undefined) last7DaysMap[orderDateKey] += amount;
 
-            if (o.products && Array.isArray(o.products)) {
-                o.products.forEach(p => {
-                    const pname = p.name;
-                    if (!productSalesMap[pname]) productSalesMap[pname] = 0;
-                    productSalesMap[pname] += Number(p.qty || 0);
-                });
-            }
+            if (o.products) o.products.forEach(p => {
+                const pname = p.name;
+                if (!productSalesMap[pname]) productSalesMap[pname] = 0;
+                productSalesMap[pname] += Number(p.qty || 0);
+            });
             if (o.pickupType === 'self') selfCount++; else deliveryCount++;
         });
 
@@ -227,58 +236,167 @@ function Owner() {
         const barChartData = Object.entries(productSalesMap).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
         const pieChartData = [{ name: '自取', value: selfCount }, { name: '外送', value: deliveryCount }].filter(d => d.value > 0);
 
-        return {
-            stats: { pendingCount, todayCompleted, monthCompleted },
-            chartData: { lineChartData, barChartData, pieChartData }
-        };
+        return { stats: { pendingCount, todayCompleted, monthCompleted }, chartData: { lineChartData, barChartData, pieChartData } };
     }, [orders]);
 
-    // --- 商品篩選與分組 ---
+    // --- 商品管理邏輯 (⭐ 整合 Fuse.js) ---
+    const handleProductSearch = () => {
+        setActiveSearch(searchInput);
+        setSelectedParent('全部');
+        setSelectedChild('全部');
+        setSelectedBrand('全部');
+        setProdPage(1); // 搜尋時重置頁碼
+    };
+
     const processedProductGroups = useMemo(() => {
-        let filtered = rawProducts.filter(item => {
-            if (searchText && !item.name.includes(searchText)) return false;
+        let filtered = rawProducts;
+
+        // ⭐ 1. 使用 Fuse.js 進行模糊搜尋
+        if (activeSearch) {
+            const fuse = new Fuse(rawProducts, {
+                keys: ['name', 'brand', 'spec'], // 設定搜尋範圍
+                threshold: 0.3, // 容錯率 (0.0 = 完全匹配, 1.0 = 任何都匹配)
+            });
+            // fuse.search 回傳結構為 [{ item: ... }, ...]，需取回 item
+            filtered = fuse.search(activeSearch).map(result => result.item);
+        }
+
+        // ⭐ 2. 接著執行原本的分類篩選
+        filtered = filtered.filter(item => {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
             if (selectedBrand !== '全部' && item.brand !== selectedBrand) return false;
             return true;
         });
+
+        // 3. 分組
         const groups = {};
-        filtered.forEach(item => {
-            if (!groups[item.name]) groups[item.name] = [];
-            groups[item.name].push(item);
-        });
-
-        let result = Object.keys(groups).map(name => ({
-            name,
-            items: groups[name],
-            brand: groups[name][0].brand
-        }));
-
+        filtered.forEach(item => { if (!groups[item.name]) groups[item.name] = []; groups[item.name].push(item); });
+        
+        let result = Object.keys(groups).map(name => ({ name, items: groups[name], brand: groups[name][0].brand }));
+        
+        // 4. 排序
         if (sortBy === 'price_asc') result.sort((a, b) => (a.items[0].price_A || 0) - (b.items[0].price_A || 0));
         else if (sortBy === 'price_desc') result.sort((a, b) => (b.items[0].price_A || 0) - (a.items[0].price_A || 0));
-
+        
         return result;
-    }, [rawProducts, searchText, selectedParent, selectedChild, selectedBrand, sortBy]);
+    }, [rawProducts, activeSearch, selectedParent, selectedChild, selectedBrand, sortBy]);
 
     const totalProdPages = Math.ceil(processedProductGroups.length / prodPageSize);
     const currentProdData = processedProductGroups.slice((prodPage - 1) * prodPageSize, prodPage * prodPageSize);
 
-    // --- 商品修改函式 ---
-    const openEditGroupModal = (group) => {
-        setEditingGroup(group.items);
-        setEditingVariant({ ...group.items[0] });
-        setIsEditModalOpen(true);
-    };
-
+    const openEditGroupModal = (group) => { setEditingGroup(group.items); setEditingVariant({ ...group.items[0] }); setIsEditModalOpen(true); };
     const saveProductChanges = async () => {
         if (!editingVariant) return;
         try {
             await api.put(`/products/${editingVariant.id}`, editingVariant);
             alert("修改成功");
-            // 更新本地資料
             setRawProducts(prev => prev.map(p => p.id === editingVariant.id ? editingVariant : p));
             setEditingGroup(prev => prev.map(p => p.id === editingVariant.id ? editingVariant : p));
         } catch (e) { alert("修改失敗"); }
+    };
+
+    // --- 渲染訂單列元件 (完整版) ---
+    const renderOrderRow = (o, isCompleted = false, isPendingReview = false) => {
+        const isEditing = editingOrder && editingOrder.id === o.id;
+        const displayOrder = isEditing ? editingOrder : o;
+
+        return (
+            <>
+                <tr key={o.id} style={{ 
+                    background: isCompleted ? '#f5f5f5' : (o.isPrinted ? '#f0f0f0' : 'white'), 
+                    opacity: isCompleted ? 0.6 : 1,
+                    color: isCompleted ? '#888' : 'inherit'
+                }}>
+                    <td>{o.時間}</td>
+                    <td>{o.pickupDate}<br /><span style={{ fontSize: '0.8em', color: '#666' }}>{o.pickupTime || '外送'}</span></td>
+                    <td>{o.storeName}</td>
+                    
+                    {isPendingReview ? (
+                        <td>
+                            {o.pickupType === 'delivery' ? (
+                                <div style={{display:'flex', alignItems:'center', gap:'5px'}}>
+                                    <input type="date" style={{padding:'5px', border:'1px solid #ccc', borderRadius:'4px'}} value={pendingDates[o.id] || ''} onChange={(e) => setPendingDates({...pendingDates, [o.id]: e.target.value})}/>
+                                    <button className="btn-detail" style={{background:'#e65100', color:'white'}} onClick={() => confirmPendingOrder(o)}>確認</button>
+                                </div>
+                            ) : (
+                                <button className="btn-detail" style={{background:'#e65100', color:'white'}} onClick={() => confirmPendingOrder(o)}>確認</button>
+                            )}
+                        </td>
+                    ) : (
+                        <td className="text-price" style={{color: isCompleted ? '#999' : '#e53935'}}>${o.total}</td>
+                    )}
+
+                    <td>
+                        {isPendingReview ? '待審核' : (isCompleted ? '✅ 已完成' : (o.isPrinted ? '已列印' : '未列印'))}
+                    </td>
+                    <td>
+                        {!isPendingReview && (
+                            <button className="btn-detail" onClick={() => printOrder(o.id)}>🖨</button>
+                        )}
+                        <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
+                        {!isCompleted && !isPendingReview && (
+                            <button className="btn-detail" style={{background: '#43a047', color:'white'}} onClick={() => completeOrder(o.id)}>完成</button>
+                        )}
+                    </td>
+                </tr>
+                {expandedOrderId === o.id && (
+                    <tr style={{ background: '#fafafa' }}>
+                        <td colSpan="6" style={{ padding: '10px 20px' }}>
+                            <div className="order-dropdown">
+                                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+                                    <h4>商品明細：</h4>
+                                    <div>
+                                        {!isEditing ? (
+                                            <>
+                                                <button className="btn-detail" style={{background:'#2196f3', color:'white'}} onClick={() => startEditOrder(o)}>✏️ 編輯訂單</button>
+                                                <button className="btn-delete" onClick={() => deleteOrder(o.id)}>🗑 刪除訂單</button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <button className="btn-detail" style={{background:'#4caf50', color:'white'}} onClick={saveOrderEdit}>💾 儲存</button>
+                                                <button className="btn-detail" onClick={() => setEditingOrder(null)}>❌ 取消</button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <ul>
+                                    {displayOrder.products && displayOrder.products.map((p, idx) => (
+                                        <li key={idx} style={{display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid #eee'}}>
+                                            <span>{p.name} ({p.note})</span>
+                                            {isEditing ? (
+                                                <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                                                    <button onClick={() => handleEditItemQty(idx, -1)} style={{padding:'2px 8px'}}>-</button>
+                                                    <span>{p.qty}</span>
+                                                    <button onClick={() => handleEditItemQty(idx, 1)} style={{padding:'2px 8px'}}>+</button>
+                                                </div>
+                                            ) : (
+                                                <span>x{p.qty}</span>
+                                            )}
+                                            <span>(${p.price})</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                                {isEditing && (
+                                    <div style={{marginTop:'10px', fontWeight:'bold', color:'blue'}}>
+                                        預估新總價: ${displayOrder.products.reduce((sum, p) => sum + (p.price * p.qty), 0)}
+                                    </div>
+                                )}
+                                <div style={{ marginTop: '10px' }}>
+                                    <p><strong>電話：</strong> {users.find(u => u.uuid === o.user_uuid)?.phone || '未知'}</p>
+                                    <p><strong>備註：</strong> 
+                                        {isEditing ? 
+                                            <input value={displayOrder.order_note || ''} onChange={e => setEditingOrder({...editingOrder, order_note: e.target.value})} style={{width:'80%', padding:'5px', border:'1px solid #ccc'}}/> 
+                                            : o.order_note}
+                                    </p>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                )}
+            </>
+        );
     };
 
     if (!isLoggedIn) {
@@ -318,24 +436,9 @@ function Owner() {
                             <div className="stat-card"><span>📅 本月完成訂單</span><strong>{stats.monthCompleted} 筆</strong></div>
                         </div>
                         <div className="charts-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginTop: '30px' }}>
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <h3 style={{ marginBottom: '20px', color: '#555' }}>📈 近 7 日營收趨勢</h3>
-                                <div style={{ width: '100%', height: 300 }}>
-                                    <ResponsiveContainer><LineChart data={chartData.lineChartData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Line type="monotone" dataKey="revenue" stroke="#8884d8" /></LineChart></ResponsiveContainer>
-                                </div>
-                            </div>
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <h3 style={{ marginBottom: '20px', color: '#555' }}>🏆 熱銷商品 Top 5</h3>
-                                <div style={{ width: '100%', height: 300 }}>
-                                    <ResponsiveContainer><BarChart data={chartData.barChartData} layout="vertical"><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" /><YAxis dataKey="name" type="category" width={100} /><Tooltip /><Bar dataKey="qty" fill="#82ca9d" /></BarChart></ResponsiveContainer>
-                                </div>
-                            </div>
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <h3 style={{ marginBottom: '20px', color: '#555' }}>🛵 訂單類型分佈</h3>
-                                <div style={{ width: '100%', height: 300 }}>
-                                    <ResponsiveContainer><PieChart><Pie data={chartData.pieChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} fill="#8884d8" dataKey="value" label>{chartData.pieChartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer>
-                                </div>
-                            </div>
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}><h3 style={{ marginBottom: '20px', color: '#555' }}>📈 近 7 日營收趨勢</h3><div style={{ width: '100%', height: 300 }}><ResponsiveContainer><LineChart data={chartData.lineChartData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Line type="monotone" dataKey="revenue" stroke="#8884d8" /></LineChart></ResponsiveContainer></div></div>
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}><h3 style={{ marginBottom: '20px', color: '#555' }}>🏆 熱銷商品 Top 5</h3><div style={{ width: '100%', height: 300 }}><ResponsiveContainer><BarChart data={chartData.barChartData} layout="vertical"><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" /><YAxis dataKey="name" type="category" width={100} /><Tooltip /><Bar dataKey="qty" fill="#82ca9d" /></BarChart></ResponsiveContainer></div></div>
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}><h3 style={{ marginBottom: '20px', color: '#555' }}>🛵 訂單類型分佈</h3><div style={{ width: '100%', height: 300 }}><ResponsiveContainer><PieChart><Pie data={chartData.pieChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} fill="#8884d8" dataKey="value" label>{chartData.pieChartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer></div></div>
                         </div>
                     </div>
                 )}
@@ -344,45 +447,20 @@ function Owner() {
                     <div className="orders-view">
                         <header className="content-header"><h2>訂單管理</h2></header>
 
-                        {/* ⭐ 新增區塊：待審訂單 (Pending Review) */}
+                        {/* 待審訂單區塊 (Pending Review) */}
                         <div className="pending-section" style={{ marginBottom: '40px', background: '#fff3e0', padding: '20px', borderRadius: '10px', border: '1px solid #ffe0b2' }}>
                             <h3 style={{ color: '#e65100', marginBottom: '15px' }}>🔔 待審訂單 ({pendingReviewOrders.length})</h3>
-                            {pendingReviewOrders.length === 0 ? (
-                                <p style={{ color: '#888' }}>目前沒有新進訂單。</p>
-                            ) : (
+                            {pendingReviewOrders.length === 0 ? <p style={{ color: '#888' }}>目前沒有新進訂單。</p> : (
                                 <table className="admin-table" style={{ background: 'white' }}>
-                                    <thead><tr><th>下單時間</th><th>類型</th><th>店家名稱</th><th>操作 / 設定</th></tr></thead>
+                                    <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>操作</th><th>狀態</th><th>明細</th></tr></thead>
                                     <tbody>
-                                        {pendingReviewOrders.map(o => (
-                                            <tr key={o.id}>
-                                                <td>{o.時間}</td>
-                                                <td>{o.pickupType === 'self' ? '🏠 自取' : '🚚 送貨'}</td>
-                                                <td>{o.storeName}</td>
-                                                <td>
-                                                    {o.pickupType === 'delivery' ? (
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                            <span style={{ fontSize: '0.9em' }}>出貨日期:</span>
-                                                            <input
-                                                                type="date"
-                                                                style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc' }}
-                                                                value={pendingDates[o.id] || ''}
-                                                                onChange={(e) => setPendingDates({ ...pendingDates, [o.id]: e.target.value })}
-                                                            />
-                                                            <button className="btn-detail" style={{ background: '#e65100', color: 'white' }} onClick={() => confirmPendingOrder(o)}>確認訂單</button>
-                                                        </div>
-                                                    ) : (
-                                                        <button className="btn-detail" style={{ background: '#e65100', color: 'white' }} onClick={() => confirmPendingOrder(o)}>確認訂單</button>
-                                                    )}
-                                                    <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                        {pendingReviewOrders.map(o => renderOrderRow(o, false, true))}
                                     </tbody>
                                 </table>
                             )}
                         </div>
 
-                        {/* 下方正式列表 */}
+                        {/* 正式列表 (Active) */}
                         <div className="tabs" style={{ marginBottom: '10px' }}>
                             <button className={orderSubTab === 'today' ? 'active' : ''} onClick={() => setOrderSubTab('today')}>今日出單</button>
                             <button className={orderSubTab === 'future' ? 'active' : ''} onClick={() => setOrderSubTab('future')}>非今日出單</button>
@@ -393,73 +471,44 @@ function Owner() {
                             <button className={`filter-btn ${filterType === 'self' ? 'active-filter' : ''}`} onClick={() => setFilterType('self')}>🏠 自取</button>
                             <button className={`filter-btn ${filterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setFilterType('delivery')}>🚚 送貨</button>
                         </div>
+                        
                         <div className="table-container">
+                            <h4 style={{padding:'10px', color:'#333'}}>📋 待處理 / 進行中</h4>
                             <table className="admin-table">
-                                <thead><tr><th>下單時間</th><th>取貨日期/時段</th><th>店家名稱</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead>
+                                <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead>
                                 <tbody>
-                                    {filteredMainOrders.map(o => {
-                                        const isCompleted = o.status === 'completed';
-                                        return (
-                                            <>
-                                                <tr key={o.id} style={{
-                                                    background: isCompleted ? '#f5f5f5' : (o.isPrinted ? '#f0f0f0' : 'white'),
-                                                    opacity: isCompleted ? 0.6 : 1,
-                                                    color: isCompleted ? '#888' : 'inherit'
-                                                }}>
-                                                    <td>{o.時間}</td>
-                                                    <td>{o.pickupDate}<br /><span style={{ fontSize: '0.8em', color: isCompleted ? '#999' : '#666' }}>{o.pickupTime || '外送'}</span></td>
-                                                    <td>{o.storeName}</td>
-                                                    <td className="text-price" style={{ color: isCompleted ? '#999' : '#e53935' }}>${o.total}</td>
-                                                    <td>
-                                                        {isCompleted ? <span style={{ color: 'gray', fontWeight: 'bold' }}>✅ 已完成</span> :
-                                                            (o.isPrinted ? <span style={{ color: 'green' }}>已列印</span> : <span style={{ color: 'red' }}>未列印</span>)
-                                                        }
-                                                    </td>
-                                                    <td>
-                                                        <button className="btn-detail" onClick={() => printOrder(o.id)}>🖨</button>
-                                                        <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
-                                                        {!isCompleted && (
-                                                            <button
-                                                                className="btn-detail"
-                                                                style={{ background: '#43a047', color: 'white' }}
-                                                                onClick={() => completeOrder(o.id)}
-                                                            >
-                                                                完成
-                                                            </button>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                                {expandedOrderId === o.id && (
-                                                    <tr style={{ background: '#fafafa' }}>
-                                                        <td colSpan="6" style={{ padding: '10px 20px' }}>
-                                                            <div className="order-dropdown">
-                                                                <h4>商品明細：</h4>
-                                                                <ul>
-                                                                    {o.products && o.products.map((p, idx) => (
-                                                                        <li key={idx}><span>{p.name} ({p.note})</span><span>x{p.qty} (${p.price})</span></li>
-                                                                    ))}
-                                                                </ul>
-                                                                <div style={{ marginTop: '10px' }}>
-                                                                    <p><strong>電話：</strong> {users.find(u => u.uuid === o.user_uuid)?.phone || '未知'}</p>
-                                                                    <p><strong>備註：</strong> {o.order_note}</p>
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </>
-                                        );
-                                    })}
+                                    {activeOrders.length > 0 ? activeOrders.map(o => renderOrderRow(o, false)) : <tr><td colSpan="6" style={{textAlign:'center'}}>無訂單</td></tr>}
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* 已完成訂單區塊 */}
+                        {completedOrders.length > 0 && (
+                            <div className="table-container" style={{marginTop: '30px', opacity: 0.8}}>
+                                <h4 style={{padding:'10px', color:'#666'}}>✅ 已完成訂單</h4>
+                                <table className="admin-table">
+                                    <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead>
+                                    <tbody>
+                                        {completedOrders.map(o => renderOrderRow(o, true))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 )}
 
                 {activeTab === "products" && (
                     <div className="product-page" style={{ paddingTop: '20px' }}>
-                        <div className="filter-section">
-                            <input placeholder="搜尋..." value={searchText} onChange={e => setSearchText(e.target.value)} style={{ marginRight: '10px', padding: '5px' }} />
+                        <div className="filter-section" style={{display:'flex', gap:'10px', alignItems:'center'}}>
+                            <input 
+                                placeholder="搜尋商品..." 
+                                value={searchInput} 
+                                onChange={e => setSearchInput(e.target.value)} 
+                                onKeyDown={e => e.key === 'Enter' && handleProductSearch()}
+                                style={{ marginRight: '10px', padding: '8px', border:'1px solid #ccc', borderRadius:'5px' }} 
+                            />
+                            <button onClick={handleProductSearch} className="filter-btn">搜尋</button>
+
                             <select onChange={e => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
                                 <option value="全部">所有分類</option>
                                 {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
@@ -503,24 +552,96 @@ function Owner() {
                         <header className="content-header"><h2>使用者管理</h2></header>
                         <div className="table-container">
                             <table className="admin-table">
-                                <thead><tr><th>店家名稱</th><th>電話</th><th>價格等級</th><th>取貨偏好</th><th>歷史訂單數</th><th>總消費</th></tr></thead>
+                                <thead><tr><th>店家名稱</th><th>電話</th><th>價格等級</th><th>訂單數</th><th>操作</th></tr></thead>
                                 <tbody>
                                     {users.map(u => (
-                                        <tr key={u.uuid}>
-                                            <td>{u.store_name}</td>
-                                            <td>{u.phone}</td>
-                                            <td>{u.price_tier}</td>
-                                            <td>{u.delivery_type === 'self' ? '自取' : '外送'}</td>
-                                            <td>{u.order_count}</td>
-                                            <td>${Number(u.total_spent).toLocaleString()}</td>
-                                        </tr>
+                                        <>
+                                            <tr key={u.uuid}>
+                                                <td>{u.store_name}</td>
+                                                <td>{u.phone}</td>
+                                                <td>{u.price_tier}</td>
+                                                <td>{u.order_count}</td>
+                                                <td>
+                                                    <button 
+                                                        className="btn-detail"
+                                                        style={{
+                                                            background: expandedUserHistory === u.uuid ? '#666' : '#2196f3',
+                                                            color: 'white'
+                                                        }}
+                                                        onClick={() => setExpandedUserHistory(expandedUserHistory === u.uuid ? null : u.uuid)}
+                                                    >
+                                                        {expandedUserHistory === u.uuid ? '收起紀錄' : `查看紀錄 (${u.order_count})`}
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            {expandedUserHistory === u.uuid && (
+                                                <tr>
+                                                    <td colSpan="6" style={{background:'#f1f8ff', padding:'20px'}}>
+                                                        <h4 style={{marginBottom:'10px'}}>{u.store_name} 的歷史紀錄：</h4>
+                                                        <table style={{width:'100%', fontSize:'0.9rem', background:'white', borderRadius:'8px'}}>
+                                                            <thead>
+                                                                <tr style={{background:'#eef'}}>
+                                                                    <th style={{padding:'10px'}}>日期</th>
+                                                                    <th>金額</th>
+                                                                    <th>狀態</th>
+                                                                    <th>明細</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {orders.filter(o => o.user_uuid === u.uuid).map(historyOrder => (
+                                                                    <>
+                                                                        <tr key={historyOrder.id} style={{borderBottom:'1px solid #eee'}}>
+                                                                            <td style={{padding:'10px'}}>{historyOrder.pickupDate}</td>
+                                                                            <td className="text-price">${historyOrder.total}</td>
+                                                                            <td>
+                                                                                {historyOrder.status === 'completed' 
+                                                                                    ? <span style={{color:'green'}}>已完成</span> 
+                                                                                    : <span style={{color:'orange'}}>處理中</span>}
+                                                                            </td>
+                                                                            <td>
+                                                                                <button 
+                                                                                    className="btn-detail"
+                                                                                    onClick={() => setExpandedHistoryOrderId(
+                                                                                        expandedHistoryOrderId === historyOrder.id ? null : historyOrder.id
+                                                                                    )}
+                                                                                >
+                                                                                    {expandedHistoryOrderId === historyOrder.id ? '▲ 收起' : '▼ 展開'}
+                                                                                </button>
+                                                                            </td>
+                                                                        </tr>
+                                                                        {expandedHistoryOrderId === historyOrder.id && (
+                                                                            <tr>
+                                                                                <td colSpan="4" style={{padding:'10px 20px', background:'#fafafa'}}>
+                                                                                    <ul style={{margin:0, paddingLeft:'20px', color:'#555'}}>
+                                                                                        {historyOrder.products.map((p, idx) => (
+                                                                                            <li key={idx}>
+                                                                                                {p.name} <span style={{color:'#888'}}>x{p.qty} (${p.price})</span>
+                                                                                            </li>
+                                                                                        ))}
+                                                                                    </ul>
+                                                                                    {historyOrder.order_note && (
+                                                                                        <div style={{marginTop:'5px', color:'#d32f2f', fontSize:'0.85rem'}}>
+                                                                                            備註: {historyOrder.order_note}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </td>
+                                                                            </tr>
+                                                                        )}
+                                                                    </>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 )}
-
+                
                 {isEditModalOpen && editingVariant && (
                     <div className="modal-overlay">
                         <div className="modal-content">
