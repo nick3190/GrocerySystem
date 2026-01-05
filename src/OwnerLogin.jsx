@@ -108,19 +108,19 @@ function Owner() {
         try {
             await api.put(`/api/orders/${order.id}/confirm`, payload);
             alert("訂單已確認，已移至下方列表");
-            
+
             // 更新本地狀態
-            setOrders(prev => prev.map(o => 
-                o.id === order.id 
-                    ? { 
-                        ...o, 
-                        status: 'pending', 
+            setOrders(prev => prev.map(o =>
+                o.id === order.id
+                    ? {
+                        ...o,
+                        status: 'pending',
                         // 如果有更新日期，也要同步更新本地資料
-                        ...(payload.pickupDate && { pickupDate: payload.pickupDate }) 
-                      } 
+                        ...(payload.pickupDate && { pickupDate: payload.pickupDate })
+                    }
                     : o
             ));
-            
+
             // 清除暫存日期
             const newPendingDates = { ...pendingDates };
             delete newPendingDates[order.id];
@@ -188,13 +188,13 @@ function Owner() {
     const { stats, chartData } = useMemo(() => {
         const todayStr = moment().format('YYYY-MM-DD');
         const currentMonth = moment().format('YYYY-MM');
-        
+
         let pendingCount = 0;   // 待處理 (含待審與處理中)
         let todayCompleted = 0; // 本日完成
         let monthCompleted = 0; // 本月完成
 
         const last7DaysMap = {};
-        for(let i=6; i>=0; i--) last7DaysMap[moment().subtract(i, 'days').format('MM/DD')] = 0;
+        for (let i = 6; i >= 0; i--) last7DaysMap[moment().subtract(i, 'days').format('MM/DD')] = 0;
         const productSalesMap = {};
         let selfCount = 0, deliveryCount = 0;
 
@@ -227,9 +227,9 @@ function Owner() {
         const barChartData = Object.entries(productSalesMap).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
         const pieChartData = [{ name: '自取', value: selfCount }, { name: '外送', value: deliveryCount }].filter(d => d.value > 0);
 
-        return { 
-            stats: { pendingCount, todayCompleted, monthCompleted }, 
-            chartData: { lineChartData, barChartData, pieChartData } 
+        return {
+            stats: { pendingCount, todayCompleted, monthCompleted },
+            chartData: { lineChartData, barChartData, pieChartData }
         };
     }, [orders]);
 
@@ -243,20 +243,20 @@ function Owner() {
             return true;
         });
         const groups = {};
-        filtered.forEach(item => { 
-            if (!groups[item.name]) groups[item.name] = []; 
-            groups[item.name].push(item); 
+        filtered.forEach(item => {
+            if (!groups[item.name]) groups[item.name] = [];
+            groups[item.name].push(item);
         });
-        
-        let result = Object.keys(groups).map(name => ({ 
-            name, 
-            items: groups[name], 
-            brand: groups[name][0].brand 
+
+        let result = Object.keys(groups).map(name => ({
+            name,
+            items: groups[name],
+            brand: groups[name][0].brand
         }));
 
         if (sortBy === 'price_asc') result.sort((a, b) => (a.items[0].price_A || 0) - (b.items[0].price_A || 0));
         else if (sortBy === 'price_desc') result.sort((a, b) => (b.items[0].price_A || 0) - (a.items[0].price_A || 0));
-        
+
         return result;
     }, [rawProducts, searchText, selectedParent, selectedChild, selectedBrand, sortBy]);
 
@@ -264,12 +264,12 @@ function Owner() {
     const currentProdData = processedProductGroups.slice((prodPage - 1) * prodPageSize, prodPage * prodPageSize);
 
     // --- 商品修改函式 ---
-    const openEditGroupModal = (group) => { 
-        setEditingGroup(group.items); 
-        setEditingVariant({ ...group.items[0] }); 
-        setIsEditModalOpen(true); 
+    const openEditGroupModal = (group) => {
+        setEditingGroup(group.items);
+        setEditingVariant({ ...group.items[0] });
+        setIsEditModalOpen(true);
     };
-    
+
     const saveProductChanges = async () => {
         if (!editingVariant) return;
         try {
@@ -313,8 +313,8 @@ function Owner() {
                     <div className="dashboard-view">
                         <header className="content-header"><h2>數據分析</h2></header>
                         <div className="stat-grid">
-                            <div className="stat-card"><span>🚨 待處理訂單</span><strong style={{color:'#e53935'}}>{stats.pendingCount} 筆</strong></div>
-                            <div className="stat-card"><span>✅ 本日完成訂單</span><strong style={{color:'#43a047'}}>{stats.todayCompleted} 筆</strong></div>
+                            <div className="stat-card"><span>🚨 待處理訂單</span><strong style={{ color: '#e53935' }}>{stats.pendingCount} 筆</strong></div>
+                            <div className="stat-card"><span>✅ 本日完成訂單</span><strong style={{ color: '#43a047' }}>{stats.todayCompleted} 筆</strong></div>
                             <div className="stat-card"><span>📅 本月完成訂單</span><strong>{stats.monthCompleted} 筆</strong></div>
                         </div>
                         <div className="charts-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginTop: '30px' }}>
@@ -345,12 +345,12 @@ function Owner() {
                         <header className="content-header"><h2>訂單管理</h2></header>
 
                         {/* ⭐ 新增區塊：待審訂單 (Pending Review) */}
-                        <div className="pending-section" style={{marginBottom: '40px', background: '#fff3e0', padding: '20px', borderRadius: '10px', border: '1px solid #ffe0b2'}}>
-                            <h3 style={{color: '#e65100', marginBottom: '15px'}}>🔔 待審訂單 ({pendingReviewOrders.length})</h3>
+                        <div className="pending-section" style={{ marginBottom: '40px', background: '#fff3e0', padding: '20px', borderRadius: '10px', border: '1px solid #ffe0b2' }}>
+                            <h3 style={{ color: '#e65100', marginBottom: '15px' }}>🔔 待審訂單 ({pendingReviewOrders.length})</h3>
                             {pendingReviewOrders.length === 0 ? (
-                                <p style={{color:'#888'}}>目前沒有新進訂單。</p>
+                                <p style={{ color: '#888' }}>目前沒有新進訂單。</p>
                             ) : (
-                                <table className="admin-table" style={{background:'white'}}>
+                                <table className="admin-table" style={{ background: 'white' }}>
                                     <thead><tr><th>下單時間</th><th>類型</th><th>店家名稱</th><th>操作 / 設定</th></tr></thead>
                                     <tbody>
                                         {pendingReviewOrders.map(o => (
@@ -360,18 +360,18 @@ function Owner() {
                                                 <td>{o.storeName}</td>
                                                 <td>
                                                     {o.pickupType === 'delivery' ? (
-                                                        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                                                            <span style={{fontSize:'0.9em'}}>出貨日期:</span>
-                                                            <input 
-                                                                type="date" 
-                                                                style={{padding:'5px', borderRadius:'5px', border:'1px solid #ccc'}}
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                            <span style={{ fontSize: '0.9em' }}>出貨日期:</span>
+                                                            <input
+                                                                type="date"
+                                                                style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc' }}
                                                                 value={pendingDates[o.id] || ''}
-                                                                onChange={(e) => setPendingDates({...pendingDates, [o.id]: e.target.value})}
+                                                                onChange={(e) => setPendingDates({ ...pendingDates, [o.id]: e.target.value })}
                                                             />
-                                                            <button className="btn-detail" style={{background:'#e65100', color:'white'}} onClick={() => confirmPendingOrder(o)}>確認訂單</button>
+                                                            <button className="btn-detail" style={{ background: '#e65100', color: 'white' }} onClick={() => confirmPendingOrder(o)}>確認訂單</button>
                                                         </div>
                                                     ) : (
-                                                        <button className="btn-detail" style={{background:'#e65100', color:'white'}} onClick={() => confirmPendingOrder(o)}>確認訂單</button>
+                                                        <button className="btn-detail" style={{ background: '#e65100', color: 'white' }} onClick={() => confirmPendingOrder(o)}>確認訂單</button>
                                                     )}
                                                     <button className="btn-detail" onClick={() => toggleOrder(o.id)}>▼ 明細</button>
                                                 </td>
@@ -401,17 +401,17 @@ function Owner() {
                                         const isCompleted = o.status === 'completed';
                                         return (
                                             <>
-                                                <tr key={o.id} style={{ 
-                                                    background: isCompleted ? '#f5f5f5' : (o.isPrinted ? '#f0f0f0' : 'white'), 
+                                                <tr key={o.id} style={{
+                                                    background: isCompleted ? '#f5f5f5' : (o.isPrinted ? '#f0f0f0' : 'white'),
                                                     opacity: isCompleted ? 0.6 : 1,
                                                     color: isCompleted ? '#888' : 'inherit'
                                                 }}>
                                                     <td>{o.時間}</td>
                                                     <td>{o.pickupDate}<br /><span style={{ fontSize: '0.8em', color: isCompleted ? '#999' : '#666' }}>{o.pickupTime || '外送'}</span></td>
                                                     <td>{o.storeName}</td>
-                                                    <td className="text-price" style={{color: isCompleted ? '#999' : '#e53935'}}>${o.total}</td>
+                                                    <td className="text-price" style={{ color: isCompleted ? '#999' : '#e53935' }}>${o.total}</td>
                                                     <td>
-                                                        {isCompleted ? <span style={{color:'gray', fontWeight:'bold'}}>✅ 已完成</span> : 
+                                                        {isCompleted ? <span style={{ color: 'gray', fontWeight: 'bold' }}>✅ 已完成</span> :
                                                             (o.isPrinted ? <span style={{ color: 'green' }}>已列印</span> : <span style={{ color: 'red' }}>未列印</span>)
                                                         }
                                                     </td>
@@ -419,9 +419,9 @@ function Owner() {
                                                         <button className="btn-detail" onClick={() => printOrder(o.id)}>🖨</button>
                                                         <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
                                                         {!isCompleted && (
-                                                            <button 
-                                                                className="btn-detail" 
-                                                                style={{background: '#43a047', color:'white'}} 
+                                                            <button
+                                                                className="btn-detail"
+                                                                style={{ background: '#43a047', color: 'white' }}
                                                                 onClick={() => completeOrder(o.id)}
                                                             >
                                                                 完成
@@ -459,8 +459,8 @@ function Owner() {
                 {activeTab === "products" && (
                     <div className="product-page" style={{ paddingTop: '20px' }}>
                         <div className="filter-section">
-                            <input placeholder="搜尋..." value={searchText} onChange={e => setSearchText(e.target.value)} style={{marginRight: '10px', padding: '5px'}}/>
-                            <select onChange={e => {setSelectedParent(e.target.value); setSelectedChild('全部');}}>
+                            <input placeholder="搜尋..." value={searchText} onChange={e => setSearchText(e.target.value)} style={{ marginRight: '10px', padding: '5px' }} />
+                            <select onChange={e => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
                                 <option value="全部">所有分類</option>
                                 {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
@@ -527,7 +527,13 @@ function Owner() {
                             <h3>修改商品</h3>
                             <div className="specs-list">
                                 {editingGroup.map(item => (
-                                    <button key={item.id} onClick={() => setEditingVariant({ ...item })}>{item.spec}</button>
+                                    <button
+                                        className={`filter-btn ${editingVariant && editingVariant.id === item.id ? 'active-filter' : ''}`}
+                                        key={item.id}
+                                        onClick={() => setEditingVariant({ ...item })}
+                                    >
+                                        {item.spec}
+                                    </button>
                                 ))}
                             </div>
                             <div className="input-group">
