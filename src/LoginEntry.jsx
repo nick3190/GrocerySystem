@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState , useEffect} from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from './api';
 import './LoginEntry.css';
@@ -76,10 +76,27 @@ function LoginEntry() {
         }
     };
 
+    useEffect(() => {
+        const checkLoginStatus = async () => {
+            try {
+                // 詢問後端：我登入了嗎？
+                const res = await api.get('/api/me');
+                if (res.data.isAuthenticated) {
+                    // 如果已登入，直接跳轉到商品頁，顧客就不會覺得要重登
+                    navigate('/productList');
+                }
+            } catch (err) {
+                // 沒登入就沒事，留在這裡顯示表格
+                console.log("尚未登入");
+            }
+        };
+        checkLoginStatus();
+    }, [navigate]);
+
     return (
         <div className="page-wrapper">
             <div className="centered-box">
-                <h2>{step === 1 ? "店家登入 / 註冊" : "輸入驗證碼"}</h2>
+                <h2>{step === 1 ? "店家登入" : "輸入驗證碼"}</h2>
 
                 {step === 1 && (
                     <div className="tabs">

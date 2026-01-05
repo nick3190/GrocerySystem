@@ -362,11 +362,23 @@ app.delete("/cart/:id", requireAuth, async (req, res) => {
 
 app.post("/api/checkout", requireAuth, async (req, res) => {
     const user = req.user;
-    const { orderNote } = req.body;
+    // ⭐ 1. 接收前端傳來的新設定 (deliveryType, address, pickupDate, pickupTime)
+    const { orderNote, deliveryType, address, pickupDate, pickupTime } = req.body;
 
     try {
         const userRes = await pool.query("SELECT * FROM users WHERE uuid = $1", [user.uuid]);
         const dbUser = userRes.rows[0];
+
+        // ⭐ 2. 決定最終使用的資訊 (前端有傳就用前端的，否則用資料庫舊的)
+        const finalDeliveryType = deliveryType || dbUser.delivery_type;
+        const finalAddress = address || dbUser.address;
+        const finalPickupDate = pickupDate || dbUser.pickup_date;
+        const finalPickupTime = pickupTime || dbUser.pickup_time;
+
+        // (驗證邏輯：如果是外送，必須有地址)
+        if (finalDeliveryType === 'delivery' && !finalAddress) {
+            return res.status(400).json({ message: "選擇外送請務必填寫地址" });
+        }
 
         const cartRes = await pool.query(`
             SELECT c.*, p.name, p."price_A", p."price_B" 
@@ -391,8 +403,7 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
         const newOrderId = generateOrderId();
 
-        // ⭐ 修改：新訂單狀態預設為 'pending_review' (待審核)
-        // 這樣它們就會出現在「待審訂單」區塊，而不是直接進入今日列表
+        // ⭐ 3. 寫入訂單時使用 final 系列變數
         const insertSql = `
             INSERT INTO orders 
             (order_id, user_uuid, receiver_name, receiver_phone, address, 
@@ -404,16 +415,19 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         await pool.query(insertSql, [
             newOrderId,
             user.uuid,
-            dbUser.store_name,
-            dbUser.phone,
-            dbUser.address,
-            dbUser.delivery_type,
-            dbUser.pickup_date,
-            dbUser.pickup_time,
+            dbUser.store_name, // 店名還是用資料庫的
+            dbUser.phone,      // 電話也是
+            finalAddress,      // 使用最終決定的地址
+            finalDeliveryType, // 使用最終決定的方式
+            finalPickupDate,
+            finalPickupTime,
             JSON.stringify(itemsJson),
             total,
             orderNote
         ]);
+
+        // (選用) 更新使用者偏好：如果您希望這次的選擇變成下次的預設值，可以加這行
+        // await pool.query("UPDATE users SET delivery_type=$1, address=$2 WHERE uuid=$3", [finalDeliveryType, finalAddress, user.uuid]);
 
         await pool.query("DELETE FROM cart_items WHERE user_uuid = $1", [user.uuid]);
 
