@@ -353,8 +353,7 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
         const cartRes = await pool.query(`
             SELECT c.*, p.name, p."price_A", p."price_B" 
-            FROM cart_items c 
-            JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
+            FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
             WHERE c.user_uuid = $1`, [user.uuid]);
 
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "購物車是空的" });
@@ -375,13 +374,14 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 
         const newOrderId = generateOrderId();
 
-        // 確保使用 DB 中最新的 pickup_date (這在 verify-otp 時已經確保不是 'today' 而是日期)
+        // ⭐ 修改：新訂單狀態預設為 'pending_review' (待審核)
+        // 這樣它們就會出現在「待審訂單」區塊，而不是直接進入今日列表
         const insertSql = `
             INSERT INTO orders 
             (order_id, user_uuid, receiver_name, receiver_phone, address, 
              pickup_type, pickup_date, pickup_time, 
-             items, total_amount, order_note, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+             items, total_amount, order_note, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_review', NOW())
         `;
 
         await pool.query(insertSql, [
@@ -443,6 +443,26 @@ app.put("/api/orders/:id/complete", async (req, res) => {
     } catch (err) {
         console.error("更新訂單狀態失敗:", err);
         res.status(500).json({ message: "更新失敗" });
+    }
+});
+
+// ⭐ 新增：確認訂單 API (將狀態轉為 pending，並可更新日期)
+app.put("/api/orders/:id/confirm", async (req, res) => {
+    const { id } = req.params;
+    const { pickupDate } = req.body; // 外送訂單會傳入這個新日期
+
+    try {
+        if (pickupDate) {
+            // 如果有傳入日期 (外送)，同時更新日期與狀態
+            await pool.query("UPDATE orders SET status = 'pending', pickup_date = $1 WHERE order_id = $2", [pickupDate, id]);
+        } else {
+            // 自取訂單只更新狀態
+            await pool.query("UPDATE orders SET status = 'pending' WHERE order_id = $1", [id]);
+        }
+        res.json({ message: "訂單已確認" });
+    } catch (err) {
+        console.error("確認訂單失敗:", err);
+        res.status(500).json({ message: "確認失敗" });
     }
 });
 
