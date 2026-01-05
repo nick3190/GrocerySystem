@@ -359,3 +359,34 @@
     background: white;
     border-radius: 20px;
 }
+
+
+/* ⭐ 新增：商品圖片樣式 */
+.product-card-img-wrapper {
+    width: 100%;
+    height: 150px; /* 固定高度，確保排版整齊 */
+    overflow: hidden;
+    border-radius: 8px 8px 0 0;
+    margin-bottom: 10px;
+    background-color: #f9f9f9;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.product-card-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* 保持比例填滿 */
+    transition: transform 0.3s ease;
+}
+
+.product-card:hover .product-card-img {
+    transform: scale(1.05); /* 懸停時微放大 */
+}
+
+/* 預設圖片佔位符樣式 */
+.product-placeholder {
+    color: #ccc;
+    font-size: 3rem;
+}

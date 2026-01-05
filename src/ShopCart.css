@@ -182,3 +182,12 @@
         align-items: flex-start;
     }
 }
+
+.cart-item-img {
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    object-fit: cover;
+    border: 1px solid #eee;
+    background-color: #fafafa;
+}

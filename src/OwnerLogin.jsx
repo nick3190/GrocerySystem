@@ -8,7 +8,6 @@ import {
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
-// ⭐ 1. 引入 fuse.js
 import Fuse from 'fuse.js';
 
 function Owner() {
@@ -28,7 +27,7 @@ function Owner() {
     const [filterType, setFilterType] = useState("all");
     const [expandedOrderId, setExpandedOrderId] = useState(null);
     const [pendingDates, setPendingDates] = useState({});
-    
+
     // 訂單編輯
     const [editingOrder, setEditingOrder] = useState(null);
 
@@ -48,9 +47,7 @@ function Owner() {
     const [editingGroup, setEditingGroup] = useState([]);
     const [editingVariant, setEditingVariant] = useState(null);
 
-    // 使用者歷史訂單展開狀態
     const [expandedUserHistory, setExpandedUserHistory] = useState(null);
-    // 歷史訂單中，哪一筆訂單被展開詳細內容
     const [expandedHistoryOrderId, setExpandedHistoryOrderId] = useState(null);
 
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
@@ -99,13 +96,13 @@ function Owner() {
             payload.pickupDate = date;
         }
         if (!window.confirm(`確定接收此訂單？${isDelivery ? `(出貨日: ${payload.pickupDate})` : ''}`)) return;
-        
+
         try {
             await api.put(`/api/orders/${order.id}/confirm`, payload);
             alert("訂單已確認");
-            setOrders(prev => prev.map(o => 
-                o.id === order.id 
-                    ? { ...o, status: 'pending', ...(payload.pickupDate && { pickupDate: payload.pickupDate }) } 
+            setOrders(prev => prev.map(o =>
+                o.id === order.id
+                    ? { ...o, status: 'pending', ...(payload.pickupDate && { pickupDate: payload.pickupDate }) }
                     : o
             ));
             const newPendingDates = { ...pendingDates };
@@ -123,7 +120,7 @@ function Owner() {
     };
 
     const deleteOrder = async (id) => {
-        if (!window.confirm("⚠️ 確定要永久刪除此訂單嗎？此操作無法復原。")) return;
+        if (!window.confirm("⚠️ 確定要永久刪除此訂單嗎？")) return;
         try {
             await api.delete(`/history/${id}`);
             setOrders(prev => prev.filter(o => o.id !== id));
@@ -131,9 +128,8 @@ function Owner() {
         } catch (e) { alert("刪除失敗"); }
     };
 
-    // --- 訂單編輯功能 ---
     const startEditOrder = (order) => {
-        setEditingOrder(JSON.parse(JSON.stringify(order))); // Deep copy
+        setEditingOrder(JSON.parse(JSON.stringify(order)));
     };
 
     const saveOrderEdit = async () => {
@@ -141,14 +137,14 @@ function Owner() {
         if (!window.confirm("確定儲存修改？")) return;
 
         const newTotal = editingOrder.products.reduce((sum, p) => sum + (Number(p.price) * Number(p.qty)), 0);
-        
+
         try {
             await api.put(`/api/orders/${editingOrder.id}`, {
                 items: editingOrder.products,
                 total: newTotal,
                 order_note: editingOrder.order_note
             });
-            
+
             setOrders(prev => prev.map(o => o.id === editingOrder.id ? { ...editingOrder, total: newTotal } : o));
             setEditingOrder(null);
             alert("修改成功");
@@ -160,9 +156,9 @@ function Owner() {
             const newProducts = [...prev.products];
             const item = newProducts[index];
             const newQty = Math.max(0, Number(item.qty) + delta);
-            
+
             if (newQty === 0) {
-                if(window.confirm("數量為 0 將移除此商品，確定嗎？")) {
+                if (window.confirm("數量為 0 將移除此商品，確定嗎？")) {
                     newProducts.splice(index, 1);
                 }
             } else {
@@ -179,11 +175,9 @@ function Owner() {
         setOrders(prev => prev.map(o => o.id === id ? { ...o, isPrinted: true } : o));
     };
 
-    // --- 資料分流 ---
     const pendingReviewOrders = useMemo(() => orders.filter(o => o.status === 'pending_review'), [orders]);
     const mainListOrders = useMemo(() => orders.filter(o => o.status === 'pending' || o.status === 'completed'), [orders]);
 
-    // --- 訂單篩選 ---
     const { activeOrders, completedOrders } = useMemo(() => {
         const todayStr = moment().format('YYYY-MM-DD');
         let res = mainListOrders;
@@ -200,13 +194,12 @@ function Owner() {
         return { activeOrders: active, completedOrders: completed };
     }, [mainListOrders, orderSubTab, filterType]);
 
-    // --- 數據統計 ---
     const { stats, chartData } = useMemo(() => {
         const todayStr = moment().format('YYYY-MM-DD');
         const currentMonth = moment().format('YYYY-MM');
         let pendingCount = 0, todayCompleted = 0, monthCompleted = 0;
         const last7DaysMap = {};
-        for(let i=6; i>=0; i--) last7DaysMap[moment().subtract(i, 'days').format('MM/DD')] = 0;
+        for (let i = 6; i >= 0; i--) last7DaysMap[moment().subtract(i, 'days').format('MM/DD')] = 0;
         const productSalesMap = {};
         let selfCount = 0, deliveryCount = 0;
 
@@ -239,29 +232,31 @@ function Owner() {
         return { stats: { pendingCount, todayCompleted, monthCompleted }, chartData: { lineChartData, barChartData, pieChartData } };
     }, [orders]);
 
-    // --- 商品管理邏輯 (⭐ 整合 Fuse.js) ---
+    // --- ⭐ 商品管理邏輯 (整合 Fuse.js) ---
     const handleProductSearch = () => {
         setActiveSearch(searchInput);
         setSelectedParent('全部');
         setSelectedChild('全部');
         setSelectedBrand('全部');
-        setProdPage(1); // 搜尋時重置頁碼
+        setProdPage(1);
     };
 
     const processedProductGroups = useMemo(() => {
         let filtered = rawProducts;
 
-        // ⭐ 1. 使用 Fuse.js 進行模糊搜尋
         if (activeSearch) {
             const fuse = new Fuse(rawProducts, {
-                keys: ['name', 'brand', 'spec'], // 設定搜尋範圍
-                threshold: 0.3, // 容錯率 (0.0 = 完全匹配, 1.0 = 任何都匹配)
+                // ⭐ 加入 alias 支援
+                keys: ['name', 'brand', 'spec', 'alias'],
+                // ⭐ 容錯率 0.4
+                threshold: 0.4,
+                // ⭐ 允許空格搜尋
+                ignoreLocation: true,
+                minMatchCharLength: 1
             });
-            // fuse.search 回傳結構為 [{ item: ... }, ...]，需取回 item
             filtered = fuse.search(activeSearch).map(result => result.item);
         }
 
-        // ⭐ 2. 接著執行原本的分類篩選
         filtered = filtered.filter(item => {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
@@ -269,16 +264,19 @@ function Owner() {
             return true;
         });
 
-        // 3. 分組
         const groups = {};
         filtered.forEach(item => { if (!groups[item.name]) groups[item.name] = []; groups[item.name].push(item); });
+
+        let result = Object.keys(groups).map(name => ({ 
+            name, 
+            items: groups[name], 
+            brand: groups[name][0].brand,
+            mainImg: groups[name][0].image || null 
+        }));
         
-        let result = Object.keys(groups).map(name => ({ name, items: groups[name], brand: groups[name][0].brand }));
-        
-        // 4. 排序
         if (sortBy === 'price_asc') result.sort((a, b) => (a.items[0].price_A || 0) - (b.items[0].price_A || 0));
         else if (sortBy === 'price_desc') result.sort((a, b) => (b.items[0].price_A || 0) - (a.items[0].price_A || 0));
-        
+
         return result;
     }, [rawProducts, activeSearch, selectedParent, selectedChild, selectedBrand, sortBy]);
 
@@ -296,35 +294,40 @@ function Owner() {
         } catch (e) { alert("修改失敗"); }
     };
 
-    // --- 渲染訂單列元件 (完整版) ---
+    const handleImageError = (e) => {
+        e.target.onerror = null;
+        e.target.src = '/images/default.png';
+    };
+
+    // --- 渲染訂單列 (保留原貌) ---
     const renderOrderRow = (o, isCompleted = false, isPendingReview = false) => {
         const isEditing = editingOrder && editingOrder.id === o.id;
         const displayOrder = isEditing ? editingOrder : o;
 
         return (
             <>
-                <tr key={o.id} style={{ 
-                    background: isCompleted ? '#f5f5f5' : (o.isPrinted ? '#f0f0f0' : 'white'), 
+                <tr key={o.id} style={{
+                    background: isCompleted ? '#f5f5f5' : (o.isPrinted ? '#f0f0f0' : 'white'),
                     opacity: isCompleted ? 0.6 : 1,
                     color: isCompleted ? '#888' : 'inherit'
                 }}>
                     <td>{o.時間}</td>
                     <td>{o.pickupDate}<br /><span style={{ fontSize: '0.8em', color: '#666' }}>{o.pickupTime || '外送'}</span></td>
                     <td>{o.storeName}</td>
-                    
+
                     {isPendingReview ? (
                         <td>
                             {o.pickupType === 'delivery' ? (
-                                <div style={{display:'flex', alignItems:'center', gap:'5px'}}>
-                                    <input type="date" style={{padding:'5px', border:'1px solid #ccc', borderRadius:'4px'}} value={pendingDates[o.id] || ''} onChange={(e) => setPendingDates({...pendingDates, [o.id]: e.target.value})}/>
-                                    <button className="btn-detail" style={{background:'#e65100', color:'white'}} onClick={() => confirmPendingOrder(o)}>確認</button>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <input type="date" style={{ padding: '5px', border: '1px solid #ccc', borderRadius: '4px' }} value={pendingDates[o.id] || ''} onChange={(e) => setPendingDates({ ...pendingDates, [o.id]: e.target.value })} />
+                                    <button className="btn-detail" style={{ background: '#e65100', color: 'white' }} onClick={() => confirmPendingOrder(o)}>確認</button>
                                 </div>
                             ) : (
-                                <button className="btn-detail" style={{background:'#e65100', color:'white'}} onClick={() => confirmPendingOrder(o)}>確認</button>
+                                <button className="btn-detail" style={{ background: '#e65100', color: 'white' }} onClick={() => confirmPendingOrder(o)}>確認</button>
                             )}
                         </td>
                     ) : (
-                        <td className="text-price" style={{color: isCompleted ? '#999' : '#e53935'}}>${o.total}</td>
+                        <td className="text-price" style={{ color: isCompleted ? '#999' : '#e53935' }}>${o.total}</td>
                     )}
 
                     <td>
@@ -336,7 +339,7 @@ function Owner() {
                         )}
                         <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
                         {!isCompleted && !isPendingReview && (
-                            <button className="btn-detail" style={{background: '#43a047', color:'white'}} onClick={() => completeOrder(o.id)}>完成</button>
+                            <button className="btn-detail" style={{ background: '#43a047', color: 'white' }} onClick={() => completeOrder(o.id)}>完成</button>
                         )}
                     </td>
                 </tr>
@@ -344,17 +347,17 @@ function Owner() {
                     <tr style={{ background: '#fafafa' }}>
                         <td colSpan="6" style={{ padding: '10px 20px' }}>
                             <div className="order-dropdown">
-                                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                                     <h4>商品明細：</h4>
                                     <div>
                                         {!isEditing ? (
                                             <>
-                                                <button className="btn-detail" style={{background:'#2196f3', color:'white'}} onClick={() => startEditOrder(o)}>✏️ 編輯訂單</button>
+                                                <button className="btn-detail" style={{ background: '#2196f3', color: 'white' }} onClick={() => startEditOrder(o)}>✏️ 編輯訂單</button>
                                                 <button className="btn-delete" onClick={() => deleteOrder(o.id)}>🗑 刪除訂單</button>
                                             </>
                                         ) : (
                                             <>
-                                                <button className="btn-detail" style={{background:'#4caf50', color:'white'}} onClick={saveOrderEdit}>💾 儲存</button>
+                                                <button className="btn-detail" style={{ background: '#4caf50', color: 'white' }} onClick={saveOrderEdit}>💾 儲存</button>
                                                 <button className="btn-detail" onClick={() => setEditingOrder(null)}>❌ 取消</button>
                                             </>
                                         )}
@@ -363,13 +366,13 @@ function Owner() {
 
                                 <ul>
                                     {displayOrder.products && displayOrder.products.map((p, idx) => (
-                                        <li key={idx} style={{display:'flex', justifyContent:'space-between', padding:'5px 0', borderBottom:'1px solid #eee'}}>
+                                        <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid #eee' }}>
                                             <span>{p.name} ({p.note})</span>
                                             {isEditing ? (
-                                                <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                                                    <button onClick={() => handleEditItemQty(idx, -1)} style={{padding:'2px 8px'}}>-</button>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                    <button onClick={() => handleEditItemQty(idx, -1)} style={{ padding: '2px 8px' }}>-</button>
                                                     <span>{p.qty}</span>
-                                                    <button onClick={() => handleEditItemQty(idx, 1)} style={{padding:'2px 8px'}}>+</button>
+                                                    <button onClick={() => handleEditItemQty(idx, 1)} style={{ padding: '2px 8px' }}>+</button>
                                                 </div>
                                             ) : (
                                                 <span>x{p.qty}</span>
@@ -379,15 +382,15 @@ function Owner() {
                                     ))}
                                 </ul>
                                 {isEditing && (
-                                    <div style={{marginTop:'10px', fontWeight:'bold', color:'blue'}}>
+                                    <div style={{ marginTop: '10px', fontWeight: 'bold', color: 'blue' }}>
                                         預估新總價: ${displayOrder.products.reduce((sum, p) => sum + (p.price * p.qty), 0)}
                                     </div>
                                 )}
                                 <div style={{ marginTop: '10px' }}>
                                     <p><strong>電話：</strong> {users.find(u => u.uuid === o.user_uuid)?.phone || '未知'}</p>
-                                    <p><strong>備註：</strong> 
-                                        {isEditing ? 
-                                            <input value={displayOrder.order_note || ''} onChange={e => setEditingOrder({...editingOrder, order_note: e.target.value})} style={{width:'80%', padding:'5px', border:'1px solid #ccc'}}/> 
+                                    <p><strong>備註：</strong>
+                                        {isEditing ?
+                                            <input value={displayOrder.order_note || ''} onChange={e => setEditingOrder({ ...editingOrder, order_note: e.target.value })} style={{ width: '80%', padding: '5px', border: '1px solid #ccc' }} />
                                             : o.order_note}
                                     </p>
                                 </div>
@@ -471,21 +474,21 @@ function Owner() {
                             <button className={`filter-btn ${filterType === 'self' ? 'active-filter' : ''}`} onClick={() => setFilterType('self')}>🏠 自取</button>
                             <button className={`filter-btn ${filterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setFilterType('delivery')}>🚚 送貨</button>
                         </div>
-                        
+
                         <div className="table-container">
-                            <h4 style={{padding:'10px', color:'#333'}}>📋 待處理 / 進行中</h4>
+                            <h4 style={{ padding: '10px', color: '#333' }}>📋 待處理 / 進行中</h4>
                             <table className="admin-table">
                                 <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead>
                                 <tbody>
-                                    {activeOrders.length > 0 ? activeOrders.map(o => renderOrderRow(o, false)) : <tr><td colSpan="6" style={{textAlign:'center'}}>無訂單</td></tr>}
+                                    {activeOrders.length > 0 ? activeOrders.map(o => renderOrderRow(o, false)) : <tr><td colSpan="6" style={{ textAlign: 'center' }}>無訂單</td></tr>}
                                 </tbody>
                             </table>
                         </div>
 
                         {/* 已完成訂單區塊 */}
                         {completedOrders.length > 0 && (
-                            <div className="table-container" style={{marginTop: '30px', opacity: 0.8}}>
-                                <h4 style={{padding:'10px', color:'#666'}}>✅ 已完成訂單</h4>
+                            <div className="table-container" style={{ marginTop: '30px', opacity: 0.8 }}>
+                                <h4 style={{ padding: '10px', color: '#666' }}>✅ 已完成訂單</h4>
                                 <table className="admin-table">
                                     <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead>
                                     <tbody>
@@ -499,13 +502,13 @@ function Owner() {
 
                 {activeTab === "products" && (
                     <div className="product-page" style={{ paddingTop: '20px' }}>
-                        <div className="filter-section" style={{display:'flex', gap:'10px', alignItems:'center'}}>
-                            <input 
-                                placeholder="搜尋商品..." 
-                                value={searchInput} 
-                                onChange={e => setSearchInput(e.target.value)} 
+                        <div className="filter-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                            <input
+                                placeholder="搜尋商品..."
+                                value={searchInput}
+                                onChange={e => setSearchInput(e.target.value)}
                                 onKeyDown={e => e.key === 'Enter' && handleProductSearch()}
-                                style={{ marginRight: '10px', padding: '8px', border:'1px solid #ccc', borderRadius:'5px' }} 
+                                style={{ marginRight: '10px', padding: '8px', border: '1px solid #ccc', borderRadius: '5px' }}
                             />
                             <button onClick={handleProductSearch} className="filter-btn">搜尋</button>
 
@@ -530,6 +533,15 @@ function Owner() {
                         <div className="product-grid">
                             {currentProdData.map(group => (
                                 <div key={group.name} className="product-card">
+                                    <div className="admin-product-img-wrapper">
+                                        <img
+                                            src={group.mainImg ? `/images/${group.mainImg}` : '/images/default.png'}
+                                            alt={group.name}
+                                            className="admin-product-img"
+                                            loading="lazy"
+                                            onError={handleImageError}
+                                        />
+                                    </div>
                                     <div className="card-body">
                                         <h3>{group.name}</h3>
                                         <span className="brand-tag">{group.brand}</span>
@@ -562,7 +574,7 @@ function Owner() {
                                                 <td>{u.price_tier}</td>
                                                 <td>{u.order_count}</td>
                                                 <td>
-                                                    <button 
+                                                    <button
                                                         className="btn-detail"
                                                         style={{
                                                             background: expandedUserHistory === u.uuid ? '#666' : '#2196f3',
@@ -576,12 +588,12 @@ function Owner() {
                                             </tr>
                                             {expandedUserHistory === u.uuid && (
                                                 <tr>
-                                                    <td colSpan="6" style={{background:'#f1f8ff', padding:'20px'}}>
-                                                        <h4 style={{marginBottom:'10px'}}>{u.store_name} 的歷史紀錄：</h4>
-                                                        <table style={{width:'100%', fontSize:'0.9rem', background:'white', borderRadius:'8px'}}>
+                                                    <td colSpan="6" style={{ background: '#f1f8ff', padding: '20px' }}>
+                                                        <h4 style={{ marginBottom: '10px' }}>{u.store_name} 的歷史紀錄：</h4>
+                                                        <table style={{ width: '100%', fontSize: '0.9rem', background: 'white', borderRadius: '8px' }}>
                                                             <thead>
-                                                                <tr style={{background:'#eef'}}>
-                                                                    <th style={{padding:'10px'}}>日期</th>
+                                                                <tr style={{ background: '#eef' }}>
+                                                                    <th style={{ padding: '10px' }}>日期</th>
                                                                     <th>金額</th>
                                                                     <th>狀態</th>
                                                                     <th>明細</th>
@@ -590,16 +602,16 @@ function Owner() {
                                                             <tbody>
                                                                 {orders.filter(o => o.user_uuid === u.uuid).map(historyOrder => (
                                                                     <>
-                                                                        <tr key={historyOrder.id} style={{borderBottom:'1px solid #eee'}}>
-                                                                            <td style={{padding:'10px'}}>{historyOrder.pickupDate}</td>
+                                                                        <tr key={historyOrder.id} style={{ borderBottom: '1px solid #eee' }}>
+                                                                            <td style={{ padding: '10px' }}>{historyOrder.pickupDate}</td>
                                                                             <td className="text-price">${historyOrder.total}</td>
                                                                             <td>
-                                                                                {historyOrder.status === 'completed' 
-                                                                                    ? <span style={{color:'green'}}>已完成</span> 
-                                                                                    : <span style={{color:'orange'}}>處理中</span>}
+                                                                                {historyOrder.status === 'completed'
+                                                                                    ? <span style={{ color: 'green' }}>已完成</span>
+                                                                                    : <span style={{ color: 'orange' }}>處理中</span>}
                                                                             </td>
                                                                             <td>
-                                                                                <button 
+                                                                                <button
                                                                                     className="btn-detail"
                                                                                     onClick={() => setExpandedHistoryOrderId(
                                                                                         expandedHistoryOrderId === historyOrder.id ? null : historyOrder.id
@@ -611,16 +623,16 @@ function Owner() {
                                                                         </tr>
                                                                         {expandedHistoryOrderId === historyOrder.id && (
                                                                             <tr>
-                                                                                <td colSpan="4" style={{padding:'10px 20px', background:'#fafafa'}}>
-                                                                                    <ul style={{margin:0, paddingLeft:'20px', color:'#555'}}>
+                                                                                <td colSpan="4" style={{ padding: '10px 20px', background: '#fafafa' }}>
+                                                                                    <ul style={{ margin: 0, paddingLeft: '20px', color: '#555' }}>
                                                                                         {historyOrder.products.map((p, idx) => (
                                                                                             <li key={idx}>
-                                                                                                {p.name} <span style={{color:'#888'}}>x{p.qty} (${p.price})</span>
+                                                                                                {p.name} <span style={{ color: '#888' }}>x{p.qty} (${p.price})</span>
                                                                                             </li>
                                                                                         ))}
                                                                                     </ul>
                                                                                     {historyOrder.order_note && (
-                                                                                        <div style={{marginTop:'5px', color:'#d32f2f', fontSize:'0.85rem'}}>
+                                                                                        <div style={{ marginTop: '5px', color: '#d32f2f', fontSize: '0.85rem' }}>
                                                                                             備註: {historyOrder.order_note}
                                                                                         </div>
                                                                                     )}
@@ -641,7 +653,7 @@ function Owner() {
                         </div>
                     </div>
                 )}
-                
+
                 {isEditModalOpen && editingVariant && (
                     <div className="modal-overlay">
                         <div className="modal-content">

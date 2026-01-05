@@ -334,3 +334,25 @@
     border-color: var(--primary);
     font-weight: bold;
 }
+
+/* ⭐ 新增：後台商品列表圖片樣式 */
+.product-card {
+    /* 確保卡片佈局支援圖片 */
+    overflow: hidden; 
+}
+
+.admin-product-img-wrapper {
+    width: 100%;
+    height: 120px; /* 後台可以稍微小一點 */
+    background-color: #f0f0f0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.admin-product-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}

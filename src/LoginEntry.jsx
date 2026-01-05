@@ -6,7 +6,7 @@ import './LoginEntry.css';
 function LoginEntry() {
     const navigate = useNavigate();
     const [step, setStep] = useState(1);
-    const [activeTab, setActiveTab] = useState('self'); 
+    const [activeTab, setActiveTab] = useState('self');
     const [isLoading, setIsLoading] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
     const [redirectMsg, setRedirectMsg] = useState(null);
@@ -20,7 +20,7 @@ function LoginEntry() {
     });
 
     // 自取專用狀態
-    const [pickupDateType, setPickupDateType] = useState('today'); 
+    const [pickupDateType, setPickupDateType] = useState('today');
     const [customDate, setCustomDate] = useState('');
     const [pickupTime, setPickupTime] = useState('');
 
@@ -35,15 +35,12 @@ function LoginEntry() {
             const res = await api.get(`/api/lookup-user?phone=${formData.phone}`);
             if (res.data.found) {
                 const u = res.data.user;
-                // 自動帶入資料
+                // 只帶入文字資料，不更動 activeTab
                 setFormData(prev => ({
                     ...prev,
                     storeName: u.storeName || '',
                     address: u.address || ''
                 }));
-                if (u.deliveryType) {
-                    setActiveTab(u.deliveryType);
-                }
             }
         } catch (e) { console.error("Lookup failed", e); }
     };
@@ -84,7 +81,7 @@ function LoginEntry() {
             };
 
             const res = await api.post('/api/verify-otp', payload);
-            navigate('/productList'); 
+            navigate('/productList');
         } catch (error) {
             alert(error.response?.data?.message || "驗證失敗");
         } finally {
@@ -120,7 +117,7 @@ function LoginEntry() {
             <div className="page-wrapper">
                 <div className="centered-box" style={{ padding: '40px' }}>
                     {redirectMsg ? <h3 style={{ color: '#2ecc71' }}>✅ {redirectMsg}</h3> : <h3>⏳ 正在確認登入狀態...</h3>}
-                    <button onClick={forceLogout} style={{ marginTop: '20px', padding: '10px', background: '#95a5a6', color: 'white', border:'none', borderRadius:'5px' }}>強制登出</button>
+                    <button onClick={forceLogout} style={{ marginTop: '20px', padding: '10px', background: '#95a5a6', color: 'white', border: 'none', borderRadius: '5px' }}>強制登出</button>
                 </div>
             </div>
         );
@@ -142,13 +139,13 @@ function LoginEntry() {
                     {step === 1 ? (
                         <>
                             {/* ⭐ 手機移到最上方，並加入 onBlur */}
-                            <input 
-                                name="phone" 
-                                placeholder="手機號碼 (輸入後自動帶入資料)" 
-                                value={formData.phone} 
-                                onChange={handleInputChange} 
+                            <input
+                                name="phone"
+                                placeholder="手機號碼 (輸入後自動帶入資料)"
+                                value={formData.phone}
+                                onChange={handleInputChange}
                                 onBlur={handlePhoneBlur}
-                                className="main-input" 
+                                className="main-input"
                             />
                             <input name="storeName" placeholder="店家名稱" value={formData.storeName} onChange={handleInputChange} className="main-input" />
 

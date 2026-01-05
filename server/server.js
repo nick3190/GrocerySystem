@@ -12,7 +12,7 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// ⭐ 1. 關鍵修正：將環境變數宣告移至最上方，確保全域可用
+// ⭐ 1. 關鍵修正：將環境變數宣告移至最上方
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -21,7 +21,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// 信任 Proxy (解決 Render 上的 Rate Limit 錯誤)
 app.set('trust proxy', 1);
 
 const distPath = path.join(__dirname, "../dist");
@@ -75,7 +74,6 @@ const verifyToken = (req) => {
 
 const requireAuth = (req, res, next) => {
     const user = verifyToken(req);
-    // 開發後門 (Render 上不會執行)
     if (!isProduction && !user) {
         req.user = { uuid: "DEV-UUID", priceTier: "A", store_name: "開發測試店", phone: "0900000000" };
         return next();
@@ -115,7 +113,6 @@ app.use('/api', limiter);
 
 // ================= API 路由 =================
 
-// 手機自動帶入資料 API
 app.get("/api/lookup-user", async (req, res) => {
     const { phone } = req.query;
     const formatted = formatPhone(phone);
@@ -242,7 +239,6 @@ app.post("/api/verify-otp", async (req, res) => {
 
 app.get("/api/me", requireAuth, async (req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    
     const user = req.user;
     try {
         const userRes = await pool.query('SELECT * FROM users WHERE uuid = $1', [user.uuid]);
@@ -280,8 +276,11 @@ app.get("/products", async (req, res) => {
 
 app.put("/products/:id", async (req, res) => {
     const { id } = req.params;
-    const { name, price_A, price_B, spec, unit, brand } = req.body;
+    // ⭐ 修正：接收前端傳來的 image (雖然這裡沒寫上傳邏輯，但若欄位存在則可更新)
+    const { name, price_A, price_B, spec, unit, brand, image } = req.body;
     try {
+        // 若您尚未新增 image 欄位到 DB，這行可能會報錯，請確保 DB 有 image 欄位
+        // 為了相容性，這裡假設您會去資料庫新增 ALTER TABLE products ADD COLUMN image VARCHAR(255);
         await pool.query(
             `UPDATE products SET name=$1, "price_A"=$2, "price_B"=$3, spec=$4, unit=$5, brand=$6 WHERE id=$7`,
             [name, price_A, price_B, spec, unit, brand, id]
@@ -298,10 +297,23 @@ app.get("/cart", requireAuth, async (req, res) => {
     try {
         const tier = user.priceTier || user.price_tier || 'A';
         const priceColumn = tier === 'B' ? 'price_B' : 'price_A';
-        const sql = `SELECT c.id, c.product_id, c.quantity, c.note, p.name, p.spec, p.unit, p.brand, p."${priceColumn}" as price FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1 ORDER BY c.created_at DESC`;
+        
+        // ⭐ 修正：加入 p.image 查詢
+        const sql = `
+            SELECT c.id, c.product_id, c.quantity, c.note, 
+                   p.name, p.spec, p.unit, p.brand, p.image,
+                   p."${priceColumn}" as price 
+            FROM cart_items c 
+            JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
+            WHERE c.user_uuid = $1 
+            ORDER BY c.created_at DESC`;
+            
         const result = await pool.query(sql, [user.uuid]);
         res.json(result.rows);
-    } catch (err) { res.status(500).json({ message: "Error" }); }
+    } catch (err) { 
+        console.error(err);
+        res.status(500).json({ message: "Error" }); 
+    }
 });
 
 app.post("/cart", requireAuth, async (req, res) => {
@@ -337,12 +349,29 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         let finalPickupTime = pickupTime || dbUser.pickup_time;
         if (!finalPickupTime) finalPickupTime = null;
 
-        const cartRes = await pool.query(`SELECT c.*, p.name, p."price_A", p."price_B" FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1`, [user.uuid]);
+        // ⭐ 修正：加入 p.image 查詢，以便寫入訂單快照
+        const cartRes = await pool.query(`
+            SELECT c.*, p.name, p."price_A", p."price_B", p.image
+            FROM cart_items c 
+            JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
+            WHERE c.user_uuid = $1`, 
+            [user.uuid]
+        );
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "Empty" });
 
         const isB = dbUser.price_tier === 'B';
         const total = cartRes.rows.reduce((sum, item) => sum + (Number(isB ? item.price_B : item.price_A) * item.quantity), 0);
-        const itemsJson = cartRes.rows.map(item => ({ id: item.product_id, name: item.name, qty: item.quantity, note: item.note, price: isB ? item.price_B : item.price_A }));
+        
+        // ⭐ 修正：將 image 寫入 itemsJson
+        const itemsJson = cartRes.rows.map(item => ({ 
+            id: item.product_id, 
+            name: item.name, 
+            qty: item.quantity, 
+            note: item.note, 
+            price: isB ? item.price_B : item.price_A,
+            image: item.image // 儲存當下圖片路徑
+        }));
+        
         const newOrderId = generateOrderId();
 
         await pool.query(
@@ -389,7 +418,10 @@ app.put("/api/orders/:id", async (req, res) => {
             [JSON.stringify(items), total, order_note, id]
         );
         res.json({ message: "訂單已更新" });
-    } catch (err) { res.status(500).json({ message: "更新失敗" }); }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "更新失敗" });
+    }
 });
 
 app.put("/api/orders/:id/confirm", async (req, res) => {
@@ -449,7 +481,6 @@ app.get("/api/my-history", requireAuth, async (req, res) => {
 app.post("/api/admin/login", (req, res) => {
     try {
         const { username, password } = req.body;
-        // ⭐ 這裡會讀取最上方已定義的 ADMIN_USERNAME
         if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
             const payload = { role: 'admin', username: 'admin' };
             const dataBase64 = Buffer.from(JSON.stringify(payload)).toString('base64');

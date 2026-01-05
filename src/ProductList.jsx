@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from './api';
 import { useNavigate } from 'react-router-dom';
-import Fuse from 'fuse.js'; // ⭐ 1. 引入 Fuse
+import Fuse from 'fuse.js'; 
 import './ProductList.css';
 
 const ProductList = () => {
@@ -72,21 +72,20 @@ const ProductList = () => {
         setCurrentPage(1);
     };
 
-    // --- 核心邏輯: 整合「Fuse.js 模糊搜尋」與「群組化」 ---
+    // --- 核心邏輯 ---
     const processedGroups = useMemo(() => {
         let filtered = rawProducts;
 
-        // ⭐ 2. Fuse.js 邏輯整合
         if (activeSearch) {
             const fuse = new Fuse(rawProducts, {
-                keys: ['name', 'spec', 'brand'], // 設定搜尋範圍
-                threshold: 0.3, // 容錯率
+                keys: ['name', 'brand', 'spec', 'alias'], 
+                threshold: 0.4, 
+                ignoreLocation: true,
+                minMatchCharLength: 1
             });
-            // 轉換 Fuse 結構回原始結構
             filtered = fuse.search(activeSearch).map(result => result.item);
         }
 
-        // 3. 繼續原本的分類篩選
         filtered = filtered.filter(item => {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
@@ -107,7 +106,9 @@ const ProductList = () => {
         return Object.keys(groups).map(name => {
             const items = groups[name];
             const minPrice = Math.min(...items.map(i => Number(i.price_A) || 0));
-            return { name, items, brand: items[0].brand, minPrice, mainImg: items[0].main_category };
+            // ⭐ 取得第一張圖片，若無則為 null
+            const mainImg = items[0].image || null;
+            return { name, items, brand: items[0].brand, minPrice, mainImg };
         });
 
     }, [rawProducts, activeSearch, selectedParent, selectedChild, selectedBrand, sortBy]);
@@ -132,6 +133,12 @@ const ProductList = () => {
             setIsModalOpen(false);
             fetchCartCount();
         } catch (err) { alert("加入失敗"); }
+    };
+
+    // ⭐ 處理圖片錯誤的函式 (切換為預設圖)
+    const handleImageError = (e) => {
+        e.target.onerror = null; // 防止無窮迴圈
+        e.target.src = '/images/default.png'; // 請確保 public/images/default.png 存在
     };
 
     return (
@@ -180,6 +187,18 @@ const ProductList = () => {
             <div className="product-grid">
                 {currentData.length > 0 ? currentData.map((group) => (
                     <div key={group.name} className="product-card" onClick={() => handleCardClick(group)}>
+                        
+                        {/* ⭐ 新增：商品圖片顯示區塊 */}
+                        <div className="product-card-img-wrapper">
+                            <img 
+                                src={group.mainImg ? `/images/${group.mainImg}` : '/images/default.png'} 
+                                alt={group.name}
+                                className="product-card-img"
+                                loading="lazy" // 效能優化：原生延遲載入
+                                onError={handleImageError}
+                            />
+                        </div>
+
                         <div className="card-body">
                             <h3 className="product-name">{group.name}</h3>
                             <div className="product-meta">
