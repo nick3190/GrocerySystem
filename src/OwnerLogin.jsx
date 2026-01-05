@@ -373,7 +373,7 @@ function Owner() {
                                                     ) : (
                                                         <button className="btn-detail" style={{ background: '#e65100', color: 'white' }} onClick={() => confirmPendingOrder(o)}>確認訂單</button>
                                                     )}
-                                                    <button className="btn-detail" onClick={() => toggleOrder(o.id)}>▼ 明細</button>
+                                                    <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
                                                 </td>
                                             </tr>
                                         ))}

@@ -7,6 +7,7 @@ import pool from './db.js';
 import ExcelJS from 'exceljs';
 import moment from 'moment';
 import twilio from 'twilio';
+import rateLimit from 'express-rate-limit';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -107,12 +108,28 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
+// Rate Limiter for OTP endpoint
+const otpLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 小時
+    max: 5, // 每個 IP 每小時只能發送 5 次簡訊 (防止惡意刷簡訊費)
+    message: { message: "簡訊發送過於頻繁，請一小時後再試" }
+});
+
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 分鐘
+    max: 100, // 每個 IP 在時間內最多 100 次請求
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "請求過於頻繁，請稍後再試" }
+});
+
+app.use('/api', limiter);
 
 // ================= API 路由 =================
 
 // --- 1. 登入與驗證 ---
 
-app.post("/api/send-otp", async (req, res) => {
+app.post("/api/send-otp", otpLimiter, async (req, res) => {
     let { phone } = req.body;
     const formattedPhone = formatPhone(phone);
 
