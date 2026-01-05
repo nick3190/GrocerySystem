@@ -9,6 +9,9 @@ function LoginEntry() {
     const [activeTab, setActiveTab] = useState('self'); // 'self' | 'delivery'
     const [isLoading, setIsLoading] = useState(false);
 
+    const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const [redirectMsg, setRedirectMsg] = useState(null);
+
     // 表單狀態
     const [formData, setFormData] = useState({
         storeName: '',
@@ -79,17 +82,68 @@ function LoginEntry() {
     useEffect(() => {
         const checkLoginStatus = async () => {
             try {
+                // 這裡會呼叫後端 (現在後端有 requireAuth，無效會直接拋出 401)
                 const res = await api.get('/api/me');
+
                 if (res.data && res.data.isAuthenticated) {
-                    navigate('/productList');
+                    // 顯示跳轉訊息，給使用者 1.5 秒的反應時間 (避免瞬間跳轉卡死)
+                    setRedirectMsg(`歡迎回來 ${res.data.user.store_name}，正在進入賣場...`);
+                    setTimeout(() => {
+                        navigate('/productList');
+                    }, 3500);
+                } else {
+                    // 有回應但 isAuthenticated 為 false (理論上不會發生，因為會 401)
+                    setIsCheckingAuth(false);
                 }
             } catch (err) {
-                // 沒登入就沒事，留在這裡顯示表格
-                console.log("尚未登入");
+                // 收到 401 或其他錯誤 -> 停留在登入頁
+                console.log("尚未登入或 Token 已失效");
+                setIsCheckingAuth(false);
             }
         };
         checkLoginStatus();
     }, [navigate]);
+
+    const forceLogout = async () => {
+        try {
+            await api.post('/logout'); // 呼叫後端清除 Cookie
+        } catch (e) { console.error(e); }
+        // 前端強制重整頁面，確保狀態清空
+        window.location.reload();
+    };
+
+    if (isCheckingAuth || redirectMsg) {
+        return (
+            <div className="page-wrapper">
+                <div className="centered-box" style={{ padding: '40px' }}>
+                    {redirectMsg ? (
+                        <>
+                            <h3 style={{ color: '#2ecc71', marginBottom: '20px' }}>✅ {redirectMsg}</h3>
+                            <p>如果沒有自動跳轉...</p>
+                        </>
+                    ) : (
+                        <h3>⏳ 正在確認登入狀態...</h3>
+                    )}
+
+                    {/* 這就是逃生門按鈕 */}
+                    <button
+                        onClick={forceLogout}
+                        style={{
+                            marginTop: '20px',
+                            padding: '10px 20px',
+                            background: '#95a5a6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '5px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        並非此帳號 / 強制登出
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="page-wrapper">

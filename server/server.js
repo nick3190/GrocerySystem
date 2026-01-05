@@ -18,6 +18,9 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "password";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
+
+app.set('trust proxy', 1);
+
 const SECRET_KEY = process.env.SECRET_KEY || "YOUR_FALLBACK_SECRET_KEY";
 const distPath = path.join(__dirname, "../dist");
 
@@ -239,19 +242,26 @@ app.post("/api/verify-otp", async (req, res) => {
     }
 });
 
-app.get("/api/me", async (req, res) => {
+app.get("/api/me", requireAuth, async (req, res) => {
+    // 禁止快取
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    const tokenPayload = verifyToken(req);
-    if (!tokenPayload) return res.status(401).json({ isAuthenticated: false });
+
+    // 因為經過 requireAuth，這裡一定有 req.user
+    const user = req.user;
+
     try {
-        const userRes = await pool.query('SELECT * FROM users WHERE uuid = $1', [tokenPayload.uuid]);
+        // 嘗試從資料庫抓最新資料
+        const userRes = await pool.query('SELECT * FROM users WHERE uuid = $1', [user.uuid]);
+        
         if (userRes.rows.length > 0) {
             res.json({ isAuthenticated: true, user: userRes.rows[0] });
         } else {
-            res.json({ isAuthenticated: true, user: tokenPayload });
+            // 這種情況很少見 (Token 有效但資料庫沒人)，但為了保險還是回傳 Token 裡的資料
+            res.json({ isAuthenticated: true, user: user });
         }
     } catch (e) {
-        res.json({ isAuthenticated: true, user: tokenPayload });
+        // 資料庫錯誤時，至少回傳 Token 資訊讓前端知道「已登入」
+        res.json({ isAuthenticated: true, user: user });
     }
 });
 
