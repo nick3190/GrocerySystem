@@ -1,4 +1,4 @@
-import { useState , useEffect} from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from './api';
 import './LoginEntry.css';
@@ -79,10 +79,8 @@ function LoginEntry() {
     useEffect(() => {
         const checkLoginStatus = async () => {
             try {
-                // 詢問後端：我登入了嗎？
                 const res = await api.get('/api/me');
-                if (res.data.isAuthenticated) {
-                    // 如果已登入，直接跳轉到商品頁，顧客就不會覺得要重登
+                if (res.data && res.data.isAuthenticated) {
                     navigate('/productList');
                 }
             } catch (err) {

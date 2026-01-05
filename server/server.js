@@ -240,6 +240,7 @@ app.post("/api/verify-otp", async (req, res) => {
 });
 
 app.get("/api/me", async (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     const tokenPayload = verifyToken(req);
     if (!tokenPayload) return res.status(401).json({ isAuthenticated: false });
     try {
