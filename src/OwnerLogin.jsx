@@ -232,7 +232,7 @@ function Owner() {
         return { stats: { pendingCount, todayCompleted, monthCompleted }, chartData: { lineChartData, barChartData, pieChartData } };
     }, [orders]);
 
-    // --- ⭐ 商品管理邏輯 (整合 Fuse.js) ---
+    // --- ⭐ 商品管理邏輯 ---
     const handleProductSearch = () => {
         setActiveSearch(searchInput);
         setSelectedParent('全部');
@@ -246,11 +246,9 @@ function Owner() {
 
         if (activeSearch) {
             const fuse = new Fuse(rawProducts, {
-                // ⭐ 加入 alias 支援
+                // ⭐ alias 支援俗稱搜尋
                 keys: ['name', 'brand', 'spec', 'alias'],
-                // ⭐ 容錯率 0.4
                 threshold: 0.4,
-                // ⭐ 允許空格搜尋
                 ignoreLocation: true,
                 minMatchCharLength: 1
             });
@@ -294,12 +292,12 @@ function Owner() {
         } catch (e) { alert("修改失敗"); }
     };
 
+    // ⭐ 處理圖片載入錯誤
     const handleImageError = (e) => {
         e.target.onerror = null;
         e.target.src = '/images/default.png';
     };
 
-    // --- 渲染訂單列 (保留原貌) ---
     const renderOrderRow = (o, isCompleted = false, isPendingReview = false) => {
         const isEditing = editingOrder && editingOrder.id === o.id;
         const displayOrder = isEditing ? editingOrder : o;
@@ -657,6 +655,16 @@ function Owner() {
                 {isEditModalOpen && editingVariant && (
                     <div className="modal-overlay">
                         <div className="modal-content">
+                            {/* ⭐ 新增：後台 Modal 圖片 */}
+                            <div className="modal-img-wrapper">
+                                <img 
+                                    src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'}
+                                    alt={editingVariant.name}
+                                    className="modal-product-img"
+                                    onError={handleImageError}
+                                />
+                            </div>
+
                             <h3>修改商品</h3>
                             <div className="specs-list">
                                 {editingGroup.map(item => (

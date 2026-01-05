@@ -28,19 +28,18 @@ function LoginEntry() {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
-    // ⭐ 新增：手機欄位失焦時自動查詢
     const handlePhoneBlur = async () => {
         if (!formData.phone || formData.phone.length < 9) return;
         try {
             const res = await api.get(`/api/lookup-user?phone=${formData.phone}`);
             if (res.data.found) {
                 const u = res.data.user;
-                // 只帶入文字資料，不更動 activeTab
                 setFormData(prev => ({
                     ...prev,
                     storeName: u.storeName || '',
                     address: u.address || ''
                 }));
+                // ⭐ 修正：不再更動 activeTab
             }
         } catch (e) { console.error("Lookup failed", e); }
     };
@@ -107,6 +106,49 @@ function LoginEntry() {
         checkLoginStatus();
     }, [navigate]);
 
+    // ⭐ 新增：彩蛋功能 (長按 d i c k 5秒)
+    useEffect(() => {
+        const targetKeys = new Set(['d', 'i', 'c', 'k']);
+        const pressed = new Set();
+        let timer = null;
+
+        const onKeyDown = (e) => {
+            if (targetKeys.has(e.key.toLowerCase())) {
+                pressed.add(e.key.toLowerCase());
+            }
+            // 檢查是否同時按下了這四個鍵
+            const allPressed = [...targetKeys].every(k => pressed.has(k));
+            
+            if (allPressed && !timer) {
+                console.log("Easter egg sequence detected! Hold for 5 seconds...");
+                timer = setTimeout(() => {
+                    // ⭐ 請將 '/owner' 替換為您真正的後台路徑
+                    navigate('/owner'); 
+                }, 5000);
+            }
+        };
+
+        const onKeyUp = (e) => {
+            if (targetKeys.has(e.key.toLowerCase())) {
+                pressed.delete(e.key.toLowerCase());
+                if (timer) {
+                    clearTimeout(timer);
+                    timer = null;
+                    console.log("Sequence broken.");
+                }
+            }
+        };
+
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('keyup', onKeyUp);
+
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            window.removeEventListener('keyup', onKeyUp);
+            if (timer) clearTimeout(timer);
+        };
+    }, [navigate]);
+
     const forceLogout = async () => {
         try { await api.post('/logout'); } catch (e) { }
         window.location.reload();
@@ -138,7 +180,6 @@ function LoginEntry() {
                 <div className="form-content">
                     {step === 1 ? (
                         <>
-                            {/* ⭐ 手機移到最上方，並加入 onBlur */}
                             <input
                                 name="phone"
                                 placeholder="手機號碼 (輸入後自動帶入資料)"

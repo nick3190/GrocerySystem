@@ -106,7 +106,7 @@ const ProductList = () => {
         return Object.keys(groups).map(name => {
             const items = groups[name];
             const minPrice = Math.min(...items.map(i => Number(i.price_A) || 0));
-            // ⭐ 取得第一張圖片，若無則為 null
+            // 列表顯示第一張圖
             const mainImg = items[0].image || null;
             return { name, items, brand: items[0].brand, minPrice, mainImg };
         });
@@ -135,10 +135,9 @@ const ProductList = () => {
         } catch (err) { alert("加入失敗"); }
     };
 
-    // ⭐ 處理圖片錯誤的函式 (切換為預設圖)
     const handleImageError = (e) => {
-        e.target.onerror = null; // 防止無窮迴圈
-        e.target.src = '/images/default.png'; // 請確保 public/images/default.png 存在
+        e.target.onerror = null;
+        e.target.src = '/images/default.png';
     };
 
     return (
@@ -188,13 +187,13 @@ const ProductList = () => {
                 {currentData.length > 0 ? currentData.map((group) => (
                     <div key={group.name} className="product-card" onClick={() => handleCardClick(group)}>
                         
-                        {/* ⭐ 新增：商品圖片顯示區塊 */}
+                        {/* 列表卡片圖片 */}
                         <div className="product-card-img-wrapper">
                             <img 
                                 src={group.mainImg ? `/images/${group.mainImg}` : '/images/default.png'} 
                                 alt={group.name}
                                 className="product-card-img"
-                                loading="lazy" // 效能優化：原生延遲載入
+                                loading="lazy"
                                 onError={handleImageError}
                             />
                         </div>
@@ -233,6 +232,17 @@ const ProductList = () => {
             {isModalOpen && selectedVariant && (
                 <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
+                        
+                        {/* ⭐ 新增：Modal 頂部圖片 (會隨 selectedVariant 改變) */}
+                        <div className="modal-img-wrapper">
+                            <img 
+                                src={selectedVariant.image ? `/images/${selectedVariant.image}` : '/images/default.png'}
+                                alt={selectedVariant.name}
+                                className="modal-product-img"
+                                onError={handleImageError}
+                            />
+                        </div>
+
                         <h3 className="modal-title">{selectedGroup[0].name}</h3>
                         <div className="specs-section">
                             <div className="specs-list">

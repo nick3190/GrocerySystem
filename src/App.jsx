@@ -8,14 +8,14 @@ import ShopCart from './ShopCart';
 import OwnerLogin from './OwnerLogin';
 import HistoryPage from './HistoryPage';
 import LoginEntry from './LoginEntry';
+import UrlObfuscator, { PathResolver } from './UrlObfuscator';
 import './App.css';
-
-
-
 
 function App() {
   return (
     <BrowserRouter>
+      <UrlObfuscator />
+
       <Routes>
         <Route path="/" element={<Navigate to="/loginEntry" />} />
         <Route path="/loginEntry" element={<LoginEntry />} />
@@ -26,9 +26,10 @@ function App() {
         <Route path="/shopCart" element={<ShopCart />} />
         <Route path="/ownerlogin" element={<OwnerLogin />} />
         <Route path="/historyPage" element={<HistoryPage />} />
+        <Route path="*" element={<PathResolver />} />
       </Routes>
     </BrowserRouter>
   );
 }
 
-export default App
+export default App;

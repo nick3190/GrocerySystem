@@ -390,3 +390,21 @@
     color: #ccc;
     font-size: 3rem;
 }
+
+.modal-img-wrapper {
+    width: 100%;
+    height: 200px; /* 您可以根據需要調整高度 */
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+
+.modal-product-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain; /* 確保完整顯示商品圖片 */
+}
