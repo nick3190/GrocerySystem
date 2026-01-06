@@ -16,6 +16,23 @@ import {
 import multer from 'multer'; 
 import fs from 'fs';
 
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const SECRET_KEY = process.env.SECRET_KEY;
+const __dirname = path.dirname(fileURLToPath(
+    import.meta.url));
+const app = express();
+const PORT = process.env.PORT || 4000;
+app.set('trust proxy', 1);
+const distPath = path.join(__dirname, "../dist");
+app.use(express.static(path.join(distPath)));
+let twilioClient;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    twilioClient = new twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+}
+const isProduction = process.env.NODE_ENV === 'production';
+
+//圖片上傳
 const uploadDir = path.join(distPath, "images");
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -36,22 +53,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const SECRET_KEY = process.env.SECRET_KEY;
-const __dirname = path.dirname(fileURLToPath(
-    import.meta.url));
-const app = express();
-const PORT = process.env.PORT || 4000;
-app.set('trust proxy', 1);
-const distPath = path.join(__dirname, "../dist");
-app.use(express.static(path.join(distPath)));
-let twilioClient;
-if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    twilioClient = new twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-}
-const isProduction = process.env.NODE_ENV === 'production';
 // --- 初始化資料庫 ---
 const initDb = async () => {
     try {
