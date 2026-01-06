@@ -41,7 +41,7 @@ function Owner() {
     const [selectedBrand, setSelectedBrand] = useState('全部');
     const [sortBy, setSortBy] = useState('default');
     const [prodPage, setProdPage] = useState(1);
-    const prodPageSize = 12;
+    const prodPageSize = 17;
 
     // ⭐ 利潤設定
     const [profitRatio, setProfitRatio] = useState(1.2);
