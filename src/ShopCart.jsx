@@ -95,7 +95,6 @@ function ShopCart() {
         }
     };
 
-    // ⭐ 補上缺失的 handleImageError
     const handleImageError = (e) => {
         e.target.onerror = null;
         e.target.src = '/images/default.png';

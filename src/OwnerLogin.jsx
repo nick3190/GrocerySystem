@@ -28,9 +28,8 @@ function Owner() {
     const [filterType, setFilterType] = useState("all");
     const [expandedOrderId, setExpandedOrderId] = useState(null);
     const [pendingDates, setPendingDates] = useState({});
-
-    // 訂單編輯
     const [editingOrder, setEditingOrder] = useState(null);
+    const [editingOrderDate, setEditingOrderDate] = useState('');
 
     // --- 商品管理狀態 ---
     const [categoriesMap, setCategoriesMap] = useState({});
@@ -44,6 +43,10 @@ function Owner() {
     const [prodPage, setProdPage] = useState(1);
     const prodPageSize = 12;
 
+    // ⭐ 利潤設定
+    const [profitRatio, setProfitRatio] = useState(1.2);
+    const [isEditingProfit, setIsEditingProfit] = useState(false);
+
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editingGroup, setEditingGroup] = useState([]);
     const [editingVariant, setEditingVariant] = useState(null);
@@ -51,6 +54,7 @@ function Owner() {
     // --- 使用者管理狀態 ---
     const [expandedUserHistory, setExpandedUserHistory] = useState(null);
     const [expandedHistoryOrderId, setExpandedHistoryOrderId] = useState(null);
+    const [editingUser, setEditingUser] = useState(null);
 
     // --- ⭐ 套組管理狀態 (優化版) ---
     const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
@@ -63,8 +67,16 @@ function Owner() {
         productIds: [] // 儲存手動選擇的商品ID
     });
     const [bundleProductSearch, setBundleProductSearch] = useState('');
+    const [manualSelectCategory, setManualSelectCategory] = useState('全部'); // 手動選品時的分類篩選
+    const [manualSelectSubCategory, setManualSelectSubCategory] = useState('全部');
+    const [manualSelectBrand, setManualSelectBrand] = useState('全部');
+    const [manualShowSelected, setManualShowSelected] = useState(false);
+
     const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
     const [selectingProductGroup, setSelectingProductGroup] = useState(null);
+
+    const [notification, setNotification] = useState(null); // { message: '新訂單 #1234' }
+    const [lastOrderId, setLastOrderId] = useState(null);
 
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
@@ -79,6 +91,15 @@ function Owner() {
                 api.get("/api/users"),
                 api.get("/api/bundles")
             ]);
+
+            if (ordRes.data.length > 0) {
+                const latest = ordRes.data[0].id;
+                if (lastOrderId && latest !== lastOrderId) {
+                    setNotification(`📦 接到新訂單！編號: ${latest}`);
+                }
+                setLastOrderId(latest);
+            }
+
             setOrders(ordRes.data || []);
             setRawProducts(prodRes.data || []);
             setCategoriesMap(catRes.data || {});
@@ -86,7 +107,7 @@ function Owner() {
             setUsers(userRes.data || []);
             setBundles(bundleRes.data || []);
         } catch (err) { console.error(err); }
-    }, []);
+    }, [lastOrderId]);
 
     useEffect(() => {
         if (isLoggedIn) {
@@ -105,94 +126,45 @@ function Owner() {
         } catch (err) { alert("登入失敗"); }
     };
 
-    // --- 套組管理邏輯 ---
-    const openCreateBundle = () => {
-        setEditingBundleId(null);
-        setNewBundle({ title: '', image: '', filterType: 'category', filterValue: '', productIds: [] });
-        setIsBundleModalOpen(true);
+    const handleLogout = async () => {
+        try { await api.post('/logout'); setIsLoggedIn(false); } catch (e) { }
     };
 
-    const openEditBundle = (bundle) => {
-        setEditingBundleId(bundle.id);
-        setNewBundle({
-            title: bundle.title,
-            image: bundle.image,
-            filterType: bundle.filter_type,
-            filterValue: bundle.filter_value,
-            productIds: bundle.product_ids ? bundle.product_ids.split(',').map(Number) : []
-        });
-        setIsBundleModalOpen(true);
-    };
+    // --- 訂單篩選 ---
+    const todayStr = moment().format('YYYY-MM-DD');
+    const expiredOrders = useMemo(() => {
+        return orders.filter(o => o.status !== 'completed' && o.status !== 'pending_review' && o.pickupDate < todayStr);
+    }, [orders]);
 
-    const handleSaveBundle = async () => {
-        if (!newBundle.title) return alert("請輸入套組名稱");
-        if (newBundle.filterType === 'manual' && newBundle.productIds.length === 0) return alert("請至少選擇一項商品");
+    const pendingReviewOrders = useMemo(() => orders.filter(o => o.status === 'pending_review'), [orders]);
+    const mainListOrders = useMemo(() => orders.filter(o => o.status === 'pending' || o.status === 'completed'), [orders]);
 
-        try {
-            if (editingBundleId) {
-                // 編輯模式
-                await api.put(`/api/bundles/${editingBundleId}`, newBundle);
-                alert("套組已更新！");
-            } else {
-                // 新增模式
-                await api.post('/api/bundles', newBundle);
-                alert("套組已建立！");
-            }
-            const res = await api.get("/api/bundles");
-            setBundles(res.data);
-            setIsBundleModalOpen(false);
-        } catch (e) {
-            console.error(e);
-            alert("儲存失敗");
-        }
-    };
+    const { activeOrders, completedOrders } = useMemo(() => {
+        let res = mainListOrders;
+        if (orderSubTab === 'today') res = res.filter(o => o.pickupDate === todayStr);
+        else if (orderSubTab === 'future') res = res.filter(o => o.pickupDate > todayStr);
 
-    const handleDeleteBundle = async (e, id) => {
-        e.stopPropagation(); // 避免觸發編輯
-        if (!confirm("確定刪除此套組？")) return;
-        try {
-            await api.delete(`/api/bundles/${id}`);
-            setBundles(prev => prev.filter(b => b.id !== id));
-        } catch (e) { alert("刪除失敗"); }
-    };
-    
+        if (filterType !== 'all') res = res.filter(o => o.pickupType === filterType);
 
-    // 套組選品：將 rawProducts 分組 (顯示為商品卡)
-    const groupedProductsForSelection = useMemo(() => {
-        let filtered = rawProducts;
-        if (bundleProductSearch) {
-            const fuse = new Fuse(rawProducts, { keys: ['name', 'id'], threshold: 0.3 });
-            filtered = fuse.search(bundleProductSearch).map(r => r.item);
+        const active = res.filter(o => o.status !== 'completed');
+        const completed = res.filter(o => o.status === 'completed');
+
+        // ⭐ 在非今日出單標籤，不顯示已完成
+        if (orderSubTab === 'future') {
+            return { activeOrders: active, completedOrders: [] };
         }
 
-        const groups = {};
-        filtered.forEach(item => {
-            if (!groups[item.name]) groups[item.name] = [];
-            groups[item.name].push(item);
-        });
+        return { activeOrders: active, completedOrders: completed };
+    }, [mainListOrders, orderSubTab, filterType]);
 
-        return Object.keys(groups).map(name => ({
-            name,
-            items: groups[name],
-            mainImg: groups[name][0].image || null,
-            // 檢查該組是否至少有一個規格被選中
-            isSelected: groups[name].some(item => newBundle.productIds.includes(item.id))
-        }));
-    }, [rawProducts, bundleProductSearch, newBundle.productIds]);
-
-    const handleGroupClick = (group) => {
-        setSelectingProductGroup(group);
-        setIsVariantModalOpen(true);
-    };
-
-    // 在第二層 Modal 中切換規格選擇
-    const toggleVariantInBundle = (productId) => {
-        setNewBundle(prev => {
-            const ids = new Set(prev.productIds);
-            if (ids.has(productId)) ids.delete(productId);
-            else ids.add(productId);
-            return { ...prev, productIds: Array.from(ids) };
-        });
+    // --- 訂單修改日期 ---
+    const updateOrderDate = async (id) => {
+        if (!editingOrderDate) return;
+        try {
+            await api.put(`/api/orders/${id}`, { pickup_date: editingOrderDate }); // Server 需支援只傳日期
+            alert("日期已更新");
+            fetchData();
+        } catch (e) { alert("更新失敗"); }
     };
 
     // --- 訂單操作邏輯 ---
@@ -284,25 +256,136 @@ function Owner() {
         setOrders(prev => prev.map(o => o.id === id ? { ...o, isPrinted: true } : o));
     };
 
-    // --- 資料篩選與計算 ---
-    const pendingReviewOrders = useMemo(() => orders.filter(o => o.status === 'pending_review'), [orders]);
-    const mainListOrders = useMemo(() => orders.filter(o => o.status === 'pending' || o.status === 'completed'), [orders]);
+    // ⭐ 套用利潤設定
+    const handleEditProfit = () => setIsEditingProfit(true);
+    const handleSaveProfit = async () => {
+        try {
+            await api.put('/api/settings', { key: 'profit_ratio', value: profitRatio });
+            alert("全域利潤已儲存");
+            setIsEditingProfit(false);
+        } catch (e) { alert("儲存失敗"); }
+    };
+    const handleApplyProfitToAll = async () => {
+        if (!confirm(`確定將全商品價格套用利潤 ${profitRatio}？此操作無法復原。`)) return;
+        try {
+            await api.post('/api/products/apply-profit', { ratio: profitRatio });
+            alert("套用成功，請重新整理頁面以查看更新");
+            fetchData();
+        } catch (e) { alert("套用失敗"); }
+    };
+    const applyProfitSettings = () => {
+        if (!editingVariant) return;
+        const newPriceA = Math.round((editingVariant.standard_cost || 0) * profitRatio);
+        setEditingVariant({ ...editingVariant, price_A: newPriceA });
+    };
 
-    const { activeOrders, completedOrders } = useMemo(() => {
-        const todayStr = moment().format('YYYY-MM-DD');
-        let res = mainListOrders;
+    const handleCostChange = (val) => {
+        if (!editingVariant) return;
+        const newCost = Number(val);
+        const newPriceA = Math.round(newCost * profitRatio);
+        setEditingVariant({ ...editingVariant, standard_cost: newCost, price_A: newPriceA });
+    };
 
-        if (orderSubTab === 'today') res = res.filter(o => o.pickupDate === todayStr);
-        else if (orderSubTab === 'future') res = res.filter(o => o.pickupDate > todayStr);
+    // --- 套組管理邏輯 ---
+    const openCreateBundle = () => {
+        setEditingBundleId(null);
+        setNewBundle({ title: '', image: '', filterType: 'category', filterValue: '', productIds: [] });
+        setIsBundleModalOpen(true);
+    };
 
-        if (filterType === 'self') res = res.filter(o => o.pickupType === 'self');
-        else if (filterType === 'delivery') res = res.filter(o => o.pickupType === 'delivery');
+    const openEditBundle = (bundle) => {
+        setEditingBundleId(bundle.id);
+        setNewBundle({
+            title: bundle.title,
+            image: bundle.image,
+            filterType: bundle.filter_type,
+            filterValue: bundle.filter_value,
+            productIds: bundle.product_ids ? bundle.product_ids.split(',').map(Number) : []
+        });
+        setIsBundleModalOpen(true);
+    };
 
-        const active = res.filter(o => o.status !== 'completed');
-        const completed = res.filter(o => o.status === 'completed');
+    const handleSaveBundle = async () => {
+        if (!newBundle.title) return alert("請輸入套組名稱");
+        if (newBundle.filterType === 'manual' && newBundle.productIds.length === 0) return alert("請至少選擇一項商品");
 
-        return { activeOrders: active, completedOrders: completed };
-    }, [mainListOrders, orderSubTab, filterType]);
+        try {
+            if (editingBundleId) {
+                // 編輯模式
+                await api.put(`/api/bundles/${editingBundleId}`, newBundle);
+                alert("套組已更新！");
+            } else {
+                // 新增模式
+                await api.post('/api/bundles', newBundle);
+                alert("套組已建立！");
+            }
+            const res = await api.get("/api/bundles");
+            setBundles(res.data);
+            setIsBundleModalOpen(false);
+        } catch (e) {
+            console.error(e);
+            alert("儲存失敗");
+        }
+    };
+
+    const handleDeleteBundle = async (e, id) => {
+        e.stopPropagation(); // 避免觸發編輯
+        if (!confirm("確定刪除此套組？")) return;
+        try {
+            await api.delete(`/api/bundles/${id}`);
+            setBundles(prev => prev.filter(b => b.id !== id));
+        } catch (e) { alert("刪除失敗"); }
+    };
+
+
+    // 套組選品：將 rawProducts 分組 (顯示為商品卡)
+    const groupedProductsForSelection = useMemo(() => {
+        let filtered = rawProducts;
+
+        // 1. 搜尋
+        if (bundleProductSearch) {
+            const fuse = new Fuse(rawProducts, { keys: ['name', 'alias'], threshold: 0.3 });
+            filtered = fuse.search(bundleProductSearch).map(r => r.item);
+        }
+
+        // 2. 篩選
+        if (manualSelectCategory !== '全部') filtered = filtered.filter(p => p.main_category === manualSelectCategory);
+        if (manualSelectSubCategory !== '全部') filtered = filtered.filter(p => p.sub_category === manualSelectSubCategory);
+        if (manualSelectBrand !== '全部') filtered = filtered.filter(p => p.brand === manualSelectBrand);
+
+        // 3. 只顯示已選
+        if (manualShowSelected) {
+            filtered = filtered.filter(p => newBundle.productIds.includes(p.id));
+        }
+
+        const groups = {};
+        filtered.forEach(item => {
+            if (!groups[item.name]) groups[item.name] = [];
+            groups[item.name].push(item);
+        });
+
+        return Object.keys(groups).map(name => ({
+            name,
+            items: groups[name],
+            mainImg: groups[name][0].image || null,
+            isSelected: groups[name].some(item => newBundle.productIds.includes(item.id))
+        }));
+    }, [rawProducts, bundleProductSearch, manualSelectCategory, manualSelectSubCategory, manualSelectBrand, manualShowSelected, newBundle.productIds]);
+
+    const handleGroupClick = (group) => {
+        setSelectingProductGroup(group);
+        setIsVariantModalOpen(true);
+    };
+
+    // 在第二層 Modal 中切換規格選擇
+    const toggleVariantInBundle = (productId) => {
+        setNewBundle(prev => {
+            const ids = new Set(prev.productIds);
+            if (ids.has(productId)) ids.delete(productId);
+            else ids.add(productId);
+            return { ...prev, productIds: Array.from(ids) };
+        });
+    };
 
     const { stats, chartData } = useMemo(() => {
         const todayStr = moment().format('YYYY-MM-DD');
@@ -404,6 +487,17 @@ function Owner() {
     const handleImageError = (e) => {
         e.target.onerror = null;
         e.target.src = '/images/default.png';
+    };
+    // --- 使用者編輯 ---
+    const handleEditUser = (user) => { setEditingUser({ ...user }); };
+    const saveUserChanges = async () => {
+        if (!editingUser) return;
+        try {
+            await api.put(`/api/users/${editingUser.uuid}`, editingUser);
+            alert("使用者已更新");
+            fetchData();
+            setEditingUser(null);
+        } catch (e) { alert("更新失敗"); }
     };
 
     // --- 渲染元件 ---
@@ -534,8 +628,17 @@ function Owner() {
                     <button className={activeTab === "products" ? "active" : ""} onClick={() => setActiveTab("products")}>🍎 商品管理</button>
                     <button className={activeTab === "bundles" ? "active" : ""} onClick={() => setActiveTab("bundles")}>🎁 套組管理</button>
                     <button className={activeTab === "users" ? "active" : ""} onClick={() => setActiveTab("users")}>👥 使用者管理</button>
+                    <button className="logout-btn-nav" onClick={handleLogout}>登出</button>
                 </div>
             </nav>
+
+            {/* ⭐ 通知系統 */}
+            {notification && (
+                <div className="notification-toast">
+                    <span>{notification}</span>
+                    <button onClick={() => setNotification(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem' }}>×</button>
+                </div>
+            )}
 
             <main className="admin-content">
                 {activeTab === "dashboard" && (
@@ -570,6 +673,13 @@ function Owner() {
                                 </table>
                             )}
                         </div>
+
+                        {expiredOrders.length > 0 && (
+                            <div className="expired-section">
+                                <h3>⚠️ 過期未完成訂單 ({expiredOrders.length})</h3>
+                                <table className="admin-table"><tbody>{expiredOrders.map(o => renderOrderRow(o))}</tbody></table>
+                            </div>
+                        )}
 
                         {/* 正式列表 (Active) */}
                         <div className="tabs" style={{ marginBottom: '10px' }}>
@@ -609,7 +719,24 @@ function Owner() {
                 )}
 
                 {activeTab === "products" && (
-                    <div className="product-page" style={{ paddingTop: '20px' }}>
+                    <div className="product-page" style={{ paddingTop: '20px' }}>{/* ⭐ 利潤設定區塊 */}
+                        <div className="profit-settings">
+                            <label><strong>全域利潤比例設定：</strong></label>
+                            {isEditingProfit ? (
+                                <>
+                                    <input type="number" step="0.1" value={profitRatio} onChange={e => setProfitRatio(e.target.value)} style={{ padding: '5px', width: '80px', borderRadius: '5px', border: '1px solid #ccc' }} />
+                                    <button className="btn-detail" onClick={handleSaveProfit}>確定</button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>{profitRatio} (預設)</span>
+                                    <button className="btn-detail" onClick={handleEditProfit}>編輯</button>
+                                </>
+                            )}
+                            <button className="btn-detail" onClick={handleApplyProfitToAll} style={{ background: '#e3f2fd', border: '1px solid #2196f3', color: '#2196f3' }}>套用至全商品</button>
+                        </div>
+
+
                         <div className="filter-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                             <input
                                 placeholder="搜尋商品..."
@@ -672,7 +799,15 @@ function Owner() {
                         <header className="content-header"><h2>使用者管理</h2></header>
                         <div className="table-container">
                             <table className="admin-table">
-                                <thead><tr><th>店家名稱</th><th>電話</th><th>價格等級</th><th>訂單數</th><th>操作</th></tr></thead>
+                                <thead>
+                                    <tr>
+                                        <th>店家名稱</th>
+                                        <th>電話</th>
+                                        <th>價格等級</th>
+                                        <th>訂單數</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
                                 <tbody>
                                     {users.map(u => (
                                         <>
@@ -682,6 +817,8 @@ function Owner() {
                                                 <td>{u.price_tier}</td>
                                                 <td>{u.order_count}</td>
                                                 <td>
+                                                    {/* ⭐ 整合：同時保留編輯與紀錄按鈕 */}
+                                                    <button className="btn-detail" onClick={() => handleEditUser(u)}>編輯</button>
                                                     <button
                                                         className="btn-detail"
                                                         style={{
@@ -690,10 +827,12 @@ function Owner() {
                                                         }}
                                                         onClick={() => setExpandedUserHistory(expandedUserHistory === u.uuid ? null : u.uuid)}
                                                     >
-                                                        {expandedUserHistory === u.uuid ? '收起紀錄' : `查看紀錄 (${u.order_count})`}
+                                                        {expandedUserHistory === u.uuid ? '收起紀錄' : `紀錄 (${u.order_count})`}
                                                     </button>
                                                 </td>
                                             </tr>
+
+                                            {/* ⭐ 歷史紀錄展開區塊 (來自第一段程式碼) */}
                                             {expandedUserHistory === u.uuid && (
                                                 <tr>
                                                     <td colSpan="6" style={{ background: '#f1f8ff', padding: '20px' }}>
@@ -729,6 +868,7 @@ function Owner() {
                                                                                 </button>
                                                                             </td>
                                                                         </tr>
+                                                                        {/* 歷史訂單的詳細商品內容 */}
                                                                         {expandedHistoryOrderId === historyOrder.id && (
                                                                             <tr>
                                                                                 <td colSpan="4" style={{ padding: '10px 20px', background: '#fafafa' }}>
@@ -759,30 +899,47 @@ function Owner() {
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* ⭐ 使用者編輯 Modal (來自第二段程式碼) */}
+                        {editingUser && (
+                            <div className="modal-overlay">
+                                <div className="modal-content">
+                                    <h3>編輯使用者</h3>
+                                    <div className="input-group">
+                                        <label>店家名稱</label>
+                                        <input value={editingUser.store_name} onChange={e => setEditingUser({ ...editingUser, store_name: e.target.value })} />
+                                    </div>
+                                    <div className="input-group">
+                                        <label>電話</label>
+                                        <input value={editingUser.phone} onChange={e => setEditingUser({ ...editingUser, phone: e.target.value })} />
+                                    </div>
+                                    <div className="input-group">
+                                        <label>價格等級 (A/B)</label>
+                                        <input value={editingUser.price_tier} onChange={e => setEditingUser({ ...editingUser, price_tier: e.target.value })} />
+                                    </div>
+                                    <div className="modal-btns">
+                                        <button className="cancel-btn" onClick={() => setEditingUser(null)}>取消</button>
+                                        <button className="confirm-btn" onClick={saveUserChanges}>儲存</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
-
                 {/* ⭐ 套組管理 (優化版) */}
                 {activeTab === "bundles" && (
                     <div className="bundles-view">
                         <header className="content-header"><h2>套組管理</h2></header>
                         <div className="product-grid">
                             <div className="new-bundle-card" onClick={openCreateBundle}>
-                                <div style={{ textAlign: 'center' }}>
-                                    <span style={{ fontSize: '3rem', display: 'block' }}>＋</span>
-                                    <span>建立新套組</span>
-                                </div>
+                                <div style={{ textAlign: 'center' }}><span style={{ fontSize: '3rem', display: 'block' }}>＋</span><span>建立新套組</span></div>
                             </div>
                             {bundles.map(b => (
                                 <div key={b.id} className="bundle-card" style={{ height: 'auto', cursor: 'pointer', background: 'white' }} onClick={() => openEditBundle(b)}>
-                                    <div style={{ height: '120px', overflow: 'hidden' }}>
-                                        <img src={b.image && b.image.startsWith('http') ? b.image : `/images/${b.image}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImageError} />
-                                    </div>
+                                    <div style={{ height: '120px', overflow: 'hidden' }}><img src={b.image && b.image.startsWith('http') ? b.image : `/images/${b.image}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImageError} /></div>
                                     <div style={{ padding: '10px' }}>
                                         <h4>{b.title}</h4>
-                                        <p style={{ fontSize: '0.9rem', color: '#666' }}>
-                                            {b.filter_type === 'manual' ? `手動 (${b.product_ids ? b.product_ids.split(',').length : 0}項)` : `條件: ${b.filter_value}`}
-                                        </p>
+                                        <p style={{ fontSize: '0.9rem', color: '#666' }}>{b.filter_type === 'manual' ? `手動 (${b.product_ids ? b.product_ids.split(',').length : 0}項)` : `條件: ${b.filter_value}`}</p>
                                         <button className="btn-delete" style={{ width: '100%', marginTop: '10px' }} onClick={(e) => handleDeleteBundle(e, b.id)}>刪除</button>
                                     </div>
                                 </div>
@@ -796,12 +953,10 @@ function Owner() {
                     <div className="modal-overlay">
                         <div className="modal-content" style={{ maxWidth: '700px' }}>
                             <h3>{editingBundleId ? '編輯套組' : '建立新套組'}</h3>
-
                             <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
-                                <div className="input-group"><label>名稱</label><input value={newBundle.title} onChange={e => setNewBundle({ ...newBundle, title: e.target.value })} style={{ width: '100%', padding: '8px' }} placeholder="例如：早餐組合" /></div>
-                                <div className="input-group" style={{ flex: 1 }}><label>圖片</label><input value={newBundle.image} onChange={e => setNewBundle({ ...newBundle, image: e.target.value })} style={{ width: '100%', padding: '8px' }} placeholder="bundle.jpg 或 URL" /></div>
+                                <div style={{ flex: 1 }}><label>名稱</label><input value={newBundle.title} onChange={e => setNewBundle({ ...newBundle, title: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }} placeholder="例如：早餐組合" /></div>
+                                <div style={{ flex: 1 }}><label>圖片</label><input value={newBundle.image} onChange={e => setNewBundle({ ...newBundle, image: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }} placeholder="bundle.jpg 或 URL" /></div>
                             </div>
-
                             <div style={{ marginBottom: '15px' }}>
                                 <label style={{ marginRight: '10px' }}>模式：</label>
                                 <label style={{ marginRight: '15px' }}><input type="radio" checked={newBundle.filterType === 'manual'} onChange={() => setNewBundle({ ...newBundle, filterType: 'manual' })} /> 手動選品</label>
@@ -811,8 +966,60 @@ function Owner() {
 
                             {newBundle.filterType === 'manual' ? (
                                 <div>
-                                    <input placeholder="搜尋商品..." value={bundleProductSearch} onChange={e => setBundleProductSearch(e.target.value)} style={{ width: '100%', padding: '8px', marginBottom: '10px', borderRadius: '10px', border: '1px solid #ccc' }} />
-                                    {/* ⭐ 網格顯示商品群組 */}
+                                    <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                                        <input
+                                            placeholder="搜尋商品..."
+                                            value={bundleProductSearch}
+                                            onChange={e => setBundleProductSearch(e.target.value)}
+                                            style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '120px' }}
+                                        />
+
+                                        {/* 主分類 */}
+                                        <select
+                                            value={manualSelectCategory}
+                                            onChange={e => {
+                                                setManualSelectCategory(e.target.value);
+                                                setManualSelectSubCategory('全部'); // 切換主分類時，重置子分類
+                                            }}
+                                            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                        >
+                                            <option value="全部">全部分類</option>
+                                            {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+
+                                        {/* 子分類 (修正：依賴 manualSelectCategory) */}
+                                        <select
+                                            value={manualSelectSubCategory}
+                                            onChange={(e) => setManualSelectSubCategory(e.target.value)}
+                                            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                        >
+                                            <option value="全部">所有子分類</option>
+                                            {manualSelectCategory !== '全部' && categoriesMap[manualSelectCategory]?.map(sub => (
+                                                <option key={sub} value={sub}>{sub}</option>
+                                            ))}
+                                        </select>
+
+                                        {/* 品牌 */}
+                                        <select
+                                            value={manualSelectBrand}
+                                            onChange={(e) => setManualSelectBrand(e.target.value)}
+                                            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                        >
+                                            <option value="全部">所有品牌</option>
+                                            {brands.map(b => (<option key={b} value={b}>{b}</option>))}
+                                        </select>
+
+                                        {/* 只顯示已選 (這也是您之前提到的需求) */}
+                                        <label style={{ display: 'flex', alignItems: 'center', fontSize: '0.9rem', cursor: 'pointer' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={manualShowSelected}
+                                                onChange={e => setManualShowSelected(e.target.checked)}
+                                                style={{ marginRight: '5px' }}
+                                            />
+                                            只顯已選
+                                        </label>
+                                    </div>
                                     <div className="selection-grid">
                                         {groupedProductsForSelection.map(group => (
                                             <div key={group.name} className={`selection-card ${group.isSelected ? 'selected' : ''}`} onClick={() => handleGroupClick(group)}>
@@ -824,9 +1031,8 @@ function Owner() {
                                     <p style={{ textAlign: 'right', marginTop: '5px', color: 'var(--primary)' }}>已選 {newBundle.productIds.length} 個規格</p>
                                 </div>
                             ) : (
-                                <div className="input-group"><label>篩選條件</label><input value={newBundle.filterValue} onChange={e => setNewBundle({ ...newBundle, filterValue: e.target.value })} style={{ width: '100%', padding: '8px' }} /></div>
+                                <div><label>篩選條件</label><input value={newBundle.filterValue} onChange={e => setNewBundle({ ...newBundle, filterValue: e.target.value })} style={{ width: '100%', padding: '8px' }} /></div>
                             )}
-
                             <div className="modal-btns" style={{ marginTop: '20px' }}>
                                 <button className="cancel-btn" onClick={() => setIsBundleModalOpen(false)}>取消</button>
                                 <button className="save-btn" onClick={handleSaveBundle}>儲存</button>
@@ -853,38 +1059,39 @@ function Owner() {
                     </div>
                 )}
 
+                {/* ⭐ 商品編輯 Modal (擴充欄位) */}
                 {isEditModalOpen && editingVariant && (
                     <div className="modal-overlay">
-                        <div className="modal-content">
-                            <div className="modal-img-wrapper">
-                                <img
-                                    src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'}
-                                    alt={editingVariant.name}
-                                    className="modal-product-img"
-                                    onError={handleImageError}
-                                />
-                            </div>
-
+                        <div className="modal-content" style={{ maxWidth: '800px' }}>
                             <h3>修改商品</h3>
-                            <div className="specs-list">
-                                {editingGroup.map(item => (
-                                    <button
-                                        className={`filter-btn ${editingVariant && editingVariant.id === item.id ? 'active-filter' : ''}`}
-                                        key={item.id}
-                                        onClick={() => setEditingVariant({ ...item })}
-                                    >
-                                        {item.spec}
-                                    </button>
-                                ))}
+                            <div className="edit-grid-form">
+                                <div className="full-width" style={{ textAlign: 'center' }}>
+                                    <img src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'} className="admin-product-img-preview" />
+                                </div>
+                                <div className="input-group"><label>圖片檔名</label><input value={editingVariant.image || ''} onChange={e => setEditingVariant({ ...editingVariant, image: e.target.value })} /></div>
+                                <div className="input-group"><label>品名</label><input value={editingVariant.name} onChange={e => setEditingVariant({ ...editingVariant, name: e.target.value })} /></div>
+                                <div className="input-group"><label>別名 (Alias)</label><input value={editingVariant.alias || ''} onChange={e => setEditingVariant({ ...editingVariant, alias: e.target.value })} /></div>
+                                <div className="input-group"><label>品牌</label><input value={editingVariant.brand || ''} onChange={e => setEditingVariant({ ...editingVariant, brand: e.target.value })} /></div>
+                                <div className="input-group"><label>供應商</label><input value={editingVariant.saler || ''} onChange={e => setEditingVariant({ ...editingVariant, saler: e.target.value })} /></div>
+                                <div className="input-group"><label>主分類</label><input value={editingVariant.main_category || ''} onChange={e => setEditingVariant({ ...editingVariant, main_category: e.target.value })} /></div>
+                                <div className="input-group"><label>子分類</label><input value={editingVariant.sub_category || ''} onChange={e => setEditingVariant({ ...editingVariant, sub_category: e.target.value })} /></div>
+                                <div className="input-group"><label>口味</label><input value={editingVariant.flavor || ''} onChange={e => setEditingVariant({ ...editingVariant, flavor: e.target.value })} /></div>
+                                <div className="input-group"><label>規格</label><input value={editingVariant.spec} onChange={e => setEditingVariant({ ...editingVariant, spec: e.target.value })} /></div>
+                                <div className="input-group"><label>單位</label><input value={editingVariant.unit || ''} onChange={e => setEditingVariant({ ...editingVariant, unit: e.target.value })} /></div>
+
+                                {/* 價格與利潤區塊 */}
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
+                                    <label>進貨成本 (Standard Cost)</label>
+                                    <input type="number" value={editingVariant.standard_cost || 0} onChange={e => handleCostChange(e.target.value)} />
+                                </div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
+                                    <label>建議售價 (Rec. Price)</label>
+                                    <input type="number" value={editingVariant.rec_price || 0} onChange={e => setEditingVariant({ ...editingVariant, rec_price: e.target.value })} />
+                                </div>
+                                <div className="input-group"><label>售價 A (Price A)</label><input type="number" value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} /></div>
+                                <div className="input-group"><label>售價 B (Price B)</label><input type="number" value={editingVariant.price_B || 0} onChange={e => setEditingVariant({ ...editingVariant, price_B: e.target.value })} /></div>
                             </div>
-                            <div className="input-group">
-                                <label>品名</label>
-                                <input value={editingVariant.name} onChange={e => setEditingVariant({ ...editingVariant, name: e.target.value })} />
-                            </div>
-                            <div className="input-group">
-                                <label>價格 A</label>
-                                <input value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} />
-                            </div>
+                            <button className="change-btn" style={{ marginBottom: '10px', background: '#2196f3' }} onClick={applyProfitSettings}>套用利潤公式 (Price A = Cost x {profitRatio})</button>
                             <div className="modal-btns">
                                 <button className="cancel-btn" onClick={() => setIsEditModalOpen(false)}>關閉</button>
                                 <button className="confirm-btn" onClick={saveProductChanges}>儲存</button>

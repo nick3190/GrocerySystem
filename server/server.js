@@ -30,7 +30,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 // --- 初始化資料庫 ---
 const initDb = async () => {
 	try {
-		// 建立 bundles 表格
+		// 1. Bundles 表
 		await pool.query(`
             CREATE TABLE IF NOT EXISTS bundles (
                 id SERIAL PRIMARY KEY,
@@ -42,16 +42,29 @@ const initDb = async () => {
                 created_at TIMESTAMP DEFAULT NOW()
             )
         `);
-		// 補欄位檢查 (針對舊資料庫)
+		// 2. Settings 表 (儲存全域設定，如利潤比例)
 		await pool.query(`
-            DO $$ 
-            BEGIN 
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='bundles' AND column_name='product_ids') THEN 
-                    ALTER TABLE bundles ADD COLUMN product_ids TEXT; 
-                END IF; 
-            END $$;
+            CREATE TABLE IF NOT EXISTS settings (
+                key VARCHAR(50) PRIMARY KEY,
+                value VARCHAR(255)
+            )
         `);
-		console.log("Database initialized");
+		// 3. 補足 products 表格缺少的欄位
+		const newColumns = ["flavor VARCHAR(50)", "spec VARCHAR(50)", "unit VARCHAR(20)", "alias VARCHAR(100)", "image VARCHAR(255)", "rec_price NUMERIC", "standard_cost NUMERIC", "brand VARCHAR(50)", "saler VARCHAR(50)", "price_A NUMERIC", "price_B NUMERIC", "main_category VARCHAR(50)", "sub_category VARCHAR(50)"];
+		for (const col of newColumns) {
+			const colName = col.split(' ')[0];
+			await pool.query(`
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='products' AND column_name='${colName}') THEN 
+                        ALTER TABLE products ADD COLUMN ${col}; 
+                    END IF; 
+                END $$;
+            `);
+		}
+		// 初始化預設利潤設定
+		await pool.query(`INSERT INTO settings (key, value) VALUES ('profit_ratio', '1.2') ON CONFLICT (key) DO NOTHING`);
+		console.log("Database initialized & columns checked");
 	} catch (e) {
 		console.error("DB Init Error:", e);
 	}
@@ -133,6 +146,105 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 // ================= API 路由 =================
+// --- 設定 (Settings) API ---
+app.get("/api/settings", async (req, res) => {
+	try {
+		const result = await pool.query("SELECT * FROM settings");
+		const settings = {};
+		result.rows.forEach(row => settings[row.key] = row.value);
+		res.json(settings);
+	} catch (e) {
+		res.status(500).json({});
+	}
+});
+app.put("/api/settings", async (req, res) => {
+	const {
+		key,
+		value
+	} = req.body;
+	try {
+		await pool.query("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2", [key, value]);
+		res.json({
+			message: "設定已更新"
+		});
+	} catch (e) {
+		res.status(500).json({
+			message: "更新失敗"
+		});
+	}
+});
+// --- 商品相關 ---
+app.get("/products", async (req, res) => {
+	try {
+		const result = await pool.query('SELECT * FROM products ORDER BY name, id');
+		res.json(result.rows);
+	} catch (err) {
+		res.status(500).json({
+			message: "Error"
+		});
+	}
+});
+app.put("/products/:id", async (req, res) => {
+	const {
+		id
+	} = req.params;
+	const {
+		name,
+		price_A,
+		price_B,
+		spec,
+		unit,
+		brand,
+		image,
+		flavor,
+		rec_price,
+		standard_cost,
+		saler,
+		alias,
+		main_category,
+		sub_category
+	} = req.body;
+	try {
+		await pool.query(`UPDATE products SET 
+                name=$1, "price_A"=$2, "price_B"=$3, spec=$4, unit=$5, brand=$6, image=$7,
+                flavor=$8, rec_price=$9, standard_cost=$10, saler=$11, alias=$12, main_category=$13, sub_category=$14
+             WHERE id=$15`, [name, price_A, price_B, spec, unit, brand, image, flavor, rec_price, standard_cost, saler, alias, main_category, sub_category, id]);
+		res.json({
+			message: "更新成功"
+		});
+	} catch (err) {
+		console.error(err);
+		res.status(500).json({
+			message: "Error"
+		});
+	}
+});
+// ⭐ 批量套用利潤設定
+app.post("/api/products/apply-profit", async (req, res) => {
+	const {
+		ratio
+	} = req.body; // 例如 1.2
+	if (!ratio || isNaN(ratio)) return res.status(400).json({
+		message: "無效的比例"
+	});
+	try {
+		// 將所有商品的 price_A 更新為 standard_cost * ratio (四捨五入)
+		// 僅針對 standard_cost 有值的商品
+		await pool.query(`
+            UPDATE products 
+            SET "price_A" = ROUND(standard_cost * $1)
+            WHERE standard_cost IS NOT NULL AND standard_cost > 0
+        `, [ratio]);
+		res.json({
+			message: "已套用至所有商品"
+		});
+	} catch (e) {
+		console.error(e);
+		res.status(500).json({
+			message: "套用失敗"
+		});
+	}
+});
 // --- 套組 (Bundles) API ---
 app.get("/api/bundles", async (req, res) => {
 	try {
@@ -163,7 +275,6 @@ app.post("/api/bundles", async (req, res) => {
 		});
 	}
 });
-// ⭐ 編輯套組 API
 app.put("/api/bundles/:id", async (req, res) => {
 	const {
 		id
@@ -200,7 +311,37 @@ app.delete("/api/bundles/:id", async (req, res) => {
 		});
 	}
 });
-// --- 其他 API (保持不變) ---
+// --- 使用者管理 API ---
+app.get("/api/users", async (req, res) => {
+	try {
+		const result = await pool.query(`SELECT u.*, COUNT(o.order_id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.uuid = o.user_uuid GROUP BY u.uuid ORDER BY order_count DESC`);
+		res.json(result.rows);
+	} catch (err) {
+		res.status(500).json([]);
+	}
+});
+app.put("/api/users/:uuid", async (req, res) => {
+	const {
+		uuid
+	} = req.params;
+	const {
+		store_name,
+		phone,
+		price_tier
+	} = req.body;
+	try {
+		await pool.query("UPDATE users SET store_name=$1, phone=$2, price_tier=$3 WHERE uuid=$4", [store_name, phone, price_tier, uuid]);
+		res.json({
+			message: "使用者已更新"
+		});
+	} catch (e) {
+		console.error(e);
+		res.status(500).json({
+			message: "更新失敗"
+		});
+	}
+});
+// --- 其他標準 API ---
 app.get("/api/lookup-user", async (req, res) => {
 	const {
 		phone
@@ -363,40 +504,6 @@ app.post("/logout", (req, res) => {
 		message: "已登出"
 	});
 });
-app.get("/products", async (req, res) => {
-	try {
-		const result = await pool.query('SELECT * FROM products ORDER BY name, id');
-		res.json(result.rows);
-	} catch (err) {
-		res.status(500).json({
-			message: "Error"
-		});
-	}
-});
-app.put("/products/:id", async (req, res) => {
-	const {
-		id
-	} = req.params;
-	const {
-		name,
-		price_A,
-		price_B,
-		spec,
-		unit,
-		brand,
-		image
-	} = req.body;
-	try {
-		await pool.query(`UPDATE products SET name=$1, "price_A"=$2, "price_B"=$3, spec=$4, unit=$5, brand=$6, image=$8 WHERE id=$7`, [name, price_A, price_B, spec, unit, brand, id, image]);
-		res.json({
-			message: "更新成功"
-		});
-	} catch (err) {
-		res.status(500).json({
-			message: "Error"
-		});
-	}
-});
 app.get("/api/categories", async (req, res) => {
 	try {
 		const result = await pool.query('SELECT DISTINCT main_category, sub_category FROM products');
@@ -424,7 +531,7 @@ app.get("/cart", requireAuth, async (req, res) => {
 	try {
 		const tier = req.user.priceTier || 'A';
 		const priceCol = tier === 'B' ? 'price_B' : 'price_A';
-		const sql = `SELECT c.id, c.product_id, c.quantity, c.note, p.name, p.spec, p.unit, p.brand, p.image, p."${priceCol}" as price FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1 ORDER BY c.created_at DESC`;
+		const sql = `SELECT c.id, c.product_id, c.quantity, c.note, p.name, p.spec, p.flavor, p.unit, p.brand, p.image, p."${priceCol}" as price FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1 ORDER BY c.created_at DESC`;
 		const result = await pool.query(sql, [req.user.uuid]);
 		res.json(result.rows);
 	} catch (err) {
@@ -460,12 +567,7 @@ app.post("/cart/batch", requireAuth, async (req, res) => {
 	const client = await pool.connect();
 	try {
 		await client.query('BEGIN');
-		const query = `
-            INSERT INTO cart_items (user_uuid, product_id, quantity, note) 
-            VALUES ($1, $2, $3, $4) 
-            ON CONFLICT (user_uuid, product_id) 
-            DO UPDATE SET quantity = cart_items.quantity + $3
-        `;
+		const query = `INSERT INTO cart_items (user_uuid, product_id, quantity, note) VALUES ($1, $2, $3, $4) ON CONFLICT (user_uuid, product_id) DO UPDATE SET quantity = cart_items.quantity + $3`;
 		for (const item of items) {
 			await client.query(query, [req.user.uuid, item.productId, item.quantity, item.note || '']);
 		}
@@ -510,7 +612,7 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 		if (!finalPickupDate) finalPickupDate = null;
 		let finalPickupTime = pickupTime || dbUser.pickup_time;
 		if (!finalPickupTime) finalPickupTime = null;
-		const cartRes = await pool.query(`SELECT c.*, p.name, p."price_A", p."price_B", p.image FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1`, [req.user.uuid]);
+		const cartRes = await pool.query(`SELECT c.*, p.name, p."price_A", p."price_B", p.image, p.flavor FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1`, [req.user.uuid]);
 		if (cartRes.rows.length === 0) return res.status(400).json({
 			message: "Empty"
 		});
@@ -522,7 +624,8 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
 			qty: item.quantity,
 			note: item.note,
 			price: isB ? item.price_B : item.price_A,
-			image: item.image
+			image: item.image,
+			flavor: item.flavor
 		}));
 		const newOrderId = generateOrderId();
 		await pool.query(`INSERT INTO orders (order_id, user_uuid, receiver_name, receiver_phone, address, pickup_type, pickup_date, pickup_time, items, total_amount, order_note, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_review', NOW())`, [newOrderId, req.user.uuid, dbUser.store_name, dbUser.phone, finalAddress, finalDeliveryType, finalPickupDate, finalPickupTime, JSON.stringify(itemsJson), total, orderNote]);
@@ -564,10 +667,15 @@ app.put("/api/orders/:id", async (req, res) => {
 	const {
 		items,
 		total,
-		order_note
+		order_note,
+		pickup_date
 	} = req.body;
 	try {
-		await pool.query("UPDATE orders SET items=$1, total_amount=$2, order_note=$3 WHERE order_id=$4", [JSON.stringify(items), total, order_note, req.params.id]);
+		if (pickup_date) {
+			await pool.query("UPDATE orders SET items=$1, total_amount=$2, order_note=$3, pickup_date=$4 WHERE order_id=$5", [JSON.stringify(items), total, order_note, pickup_date, req.params.id]);
+		} else {
+			await pool.query("UPDATE orders SET items=$1, total_amount=$2, order_note=$3 WHERE order_id=$4", [JSON.stringify(items), total, order_note, req.params.id]);
+		}
 		res.json({
 			message: "訂單已更新"
 		});
@@ -603,14 +711,6 @@ app.put("/api/orders/:id/complete", async (req, res) => {
 		res.status(500).json({
 			message: "Error"
 		});
-	}
-});
-app.get("/api/users", async (req, res) => {
-	try {
-		const result = await pool.query(`SELECT u.*, COUNT(o.order_id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.uuid = o.user_uuid GROUP BY u.uuid ORDER BY order_count DESC`);
-		res.json(result.rows);
-	} catch (err) {
-		res.status(500).json([]);
 	}
 });
 app.get("/api/orders/:id/print", async (req, res) => { /* ...省略... */

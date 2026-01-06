@@ -122,7 +122,7 @@
 }
 
 .btn-detail {
-    background: #eee;
+    background: var(--accent);
     border: none;
     padding: 5px 10px;
     border-radius: 4px;
@@ -259,7 +259,7 @@
 
 .modal-content {
     background: white;
-    padding: 25px;
+    padding: 10px 20px;
     border-radius: 15px;
     width: 90%;
     max-width: 600px;
@@ -483,4 +483,88 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+}
+
+.notification-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: white;
+    border-left: 5px solid #e53935;
+    padding: 15px 20px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    border-radius: 4px;
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 250px;
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+
+/* 過期訂單區塊 */
+.expired-section {
+    background: #ffebee;
+    border: 1px solid #ffcdd2;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 30px;
+}
+
+.expired-section h3 {
+    color: #c62828;
+    margin-bottom: 10px;
+}
+
+/* 利潤設定區塊 */
+.profit-settings {
+    background: #e3f2fd;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    border: 1px solid #bbdefb;
+}
+
+/* 擴充的編輯 Modal (Grid Layout) */
+.edit-grid-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+@media (max-width: 600px) {
+    .edit-grid-form {
+        grid-template-columns: 1fr;
+    }
+}
+
+.full-width {
+    grid-column: 1 / -1;
+}
+
+.admin-product-img-preview {
+    width: 100px;
+    height: 100px;
+    object-fit: cover;
+    margin: 10px auto;
+    display: block;
+    background: #eee;
+}
+
+.logout-btn-nav {
+    border: 1px solid rgba(255,255,255,0.3);
+    background: transparent;
+    color: white;
+    margin-top: auto;
+    padding: 10px;
+    cursor: pointer;
 }

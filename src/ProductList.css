@@ -21,12 +21,27 @@
   align-items: center;
   gap: 10px;
   color: var(--text-light);
+  position: relative;
 }
 
 .top-banner h2 {
-  margin: 10px 0;
+  margin: 0;
   font-size: 1.2rem;
-  align-self: flex-start; /* 標題靠左 */
+  align-self: center;
+}
+
+.logout-link {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    background: transparent;
+    color: white;
+    border: 1px solid rgba(255,255,255,0.5);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    z-index: 101;
 }
 
 /* 搜尋容器置中修正 */
@@ -120,12 +135,28 @@
     border-bottom: 1px solid #eee;
     overflow-x: auto; 
     white-space: nowrap;
-    justify-content: flex-start; /* 手機版靠左開始 */
+    justify-content: flex-start;
 }
 
 @media (min-width: 768px) {
+    .top-banner {
+        flex-direction: row; /* 電腦版橫向 */
+        justify-content: center;
+    }
+    .top-banner h2 {
+        position: absolute;
+        left: 80px; /* 避開登出按鈕 */
+    }
     .filter-section {
-        justify-content: center; /* 電腦版置中 */
+        justify-content: center;
+    }
+    .logout-link {
+        top: 50%;
+        transform: translateY(-50%);
+    }
+    .history-link-btn {
+        top: 50%;
+        transform: translateY(-50%);
     }
 }
 
@@ -482,7 +513,7 @@
     display: flex;
     gap: 10px;
     margin-top: 5px;
-    pointer-events: auto; /* ⭐ 恢復按鈕區域的點擊感應 */
+    pointer-events: auto;
     position: relative;
     z-index: 10;
 }
@@ -497,9 +528,8 @@
     font-size: 0.9rem;
     cursor: pointer;
     backdrop-filter: blur(4px);
-    transition: 0.2s;
     position: relative; 
-    z-index: 20; /* 確保按鈕在最上層 */
+    z-index: 20; 
 }
 
 .bundle-btn:hover {
@@ -550,4 +580,20 @@
     font-weight: bold;
     cursor: pointer;
     z-index: 100;
+}
+
+.flavor-btn {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    background: #f8f9fa;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
+.flavor-btn.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
 }

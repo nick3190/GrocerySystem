@@ -7,7 +7,6 @@ import './ProductList.css';
 const ProductList = () => {
     const navigate = useNavigate();
 
-    // 資料狀態
     const [rawProducts, setRawProducts] = useState([]);
     const [categoriesMap, setCategoriesMap] = useState({});
     const [brands, setBrands] = useState([]);
@@ -15,7 +14,6 @@ const ProductList = () => {
     const [bundles, setBundles] = useState([]);
     const [activeBundle, setActiveBundle] = useState(null);
 
-    // 篩選與分頁
     const [searchInput, setSearchInput] = useState(''); 
     const [activeSearch, setActiveSearch] = useState('');
     const [selectedParent, setSelectedParent] = useState('全部');
@@ -25,12 +23,14 @@ const ProductList = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 12;
 
-    // Modal
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState([]);
     const [selectedVariant, setSelectedVariant] = useState(null);
     const [qty, setQty] = useState(1);
     const [note, setNote] = useState('');
+    
+    // ⭐ 雙層規格狀態
+    const [selectedFlavor, setSelectedFlavor] = useState(null);
 
     useEffect(() => {
         fetchInitialData();
@@ -91,6 +91,11 @@ const ProductList = () => {
         setActiveBundle(null);
     };
 
+    const handleLogout = async () => {
+        try { await api.post('/logout'); } catch(e){}
+        navigate('/loginEntry');
+    };
+
     const getBundleItems = (bundle) => {
         let items = [];
         if (bundle.filter_type === 'manual' && bundle.product_ids) {
@@ -131,11 +136,9 @@ const ProductList = () => {
         }
     };
 
-    // --- 核心篩選邏輯 ---
     const processedGroups = useMemo(() => {
         let filtered = rawProducts;
 
-        // 1. 套組過濾優先
         if (activeBundle) {
             if (activeBundle.filter_type === 'manual') {
                 if (activeBundle.product_ids) {
@@ -151,7 +154,6 @@ const ProductList = () => {
                 filtered = fuse.search(activeBundle.filter_value).map(r => r.item);
             }
         } 
-        // 2. 關鍵字搜尋
         else if (activeSearch) {
             const fuse = new Fuse(rawProducts, {
                 keys: ['name', 'brand', 'spec', 'alias'], 
@@ -162,7 +164,6 @@ const ProductList = () => {
             filtered = fuse.search(activeSearch).map(result => result.item);
         }
 
-        // 3. 分類篩選 (現在即使在套組模式下也會執行，實現「套組內篩選」)
         filtered = filtered.filter(item => {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
@@ -184,7 +185,11 @@ const ProductList = () => {
             const items = groups[name];
             const minPrice = Math.min(...items.map(i => Number(i.price_A) || 0));
             const mainImg = items[0].image || null;
-            return { name, items, brand: items[0].brand, minPrice, mainImg };
+            
+            // 提取所有 flavor
+            const flavors = [...new Set(items.map(i => i.flavor).filter(Boolean))];
+
+            return { name, items, brand: items[0].brand, minPrice, mainImg, flavors };
         });
 
     }, [rawProducts, activeSearch, selectedParent, selectedChild, selectedBrand, sortBy, activeBundle]);
@@ -196,7 +201,13 @@ const ProductList = () => {
 
     const handleCardClick = (group) => {
         setSelectedGroup(group.items);
-        setSelectedVariant(group.items[0]);
+        
+        // ⭐ 預設選取第一個有庫存的 (或第一個)
+        // 且如果有口味，設定第一個口味
+        const first = group.items[0];
+        setSelectedVariant(first);
+        setSelectedFlavor(first.flavor || null);
+        
         setQty(1);
         setNote('');
         setIsModalOpen(true);
@@ -224,10 +235,28 @@ const ProductList = () => {
         e.target.src = '/images/default.png';
     };
 
+    // ⭐ 篩選出當前口味下的規格
+    const displayedVariants = useMemo(() => {
+        if (!selectedGroup) return [];
+        if (selectedFlavor) {
+            return selectedGroup.filter(item => item.flavor === selectedFlavor);
+        }
+        return selectedGroup; // 若無口味區分，顯示全部
+    }, [selectedGroup, selectedFlavor]);
+
+    // 取出當前商品群組的所有口味
+    const availableFlavors = useMemo(() => {
+        if (!selectedGroup) return [];
+        return [...new Set(selectedGroup.map(i => i.flavor).filter(Boolean))];
+    }, [selectedGroup]);
+
     return (
         <div className="product-page">
             <header className="sticky-header">
                 <div className="top-banner">
+                    {/* ⭐ 左上角登出 */}
+                    <button className="logout-link" onClick={handleLogout}>登出</button>
+                    
                     <h2>商品列表</h2>
                     <div className="search-wrapper">
                         <input
@@ -246,7 +275,6 @@ const ProductList = () => {
                     <button className="history-link-btn" onClick={() => navigate('/historyPage')}>歷史訂單</button>
                 </div>
 
-                {/* ⭐ 修正：移除 !activeBundle 判斷，讓篩選欄在套組模式下也顯示 */}
                 <div className="filter-section">
                     <select value={selectedParent} onChange={(e) => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
                         <option value="全部">所有分類</option>
@@ -271,7 +299,7 @@ const ProductList = () => {
             {!activeBundle && !activeSearch && bundles.length > 0 && (
                 <div className="recommendation-section">
                     <div className="recommendation-header">
-                        <h3>✨ 為您推薦：熱門商品套組</h3>
+                        <h3> 為您推薦：熱門商品套組</h3>
                     </div>
                     <div className="bundle-scroll-container">
                         {bundles.map(bundle => (
@@ -372,9 +400,30 @@ const ProductList = () => {
                             />
                         </div>
                         <h3 className="modal-title">{selectedGroup[0].name}</h3>
+                        
+                        {/* ⭐ 雙層規格篩選：先口味 */}
+                        {availableFlavors.length > 0 && (
+                            <div style={{marginBottom:'15px'}}>
+                                <p style={{fontWeight:'bold', marginBottom:'5px'}}>口味：</p>
+                                <div style={{display:'flex', flexWrap:'wrap'}}>
+                                    {availableFlavors.map(flavor => (
+                                        <button 
+                                            key={flavor}
+                                            className={`flavor-btn ${selectedFlavor === flavor ? 'active' : ''}`}
+                                            onClick={() => setSelectedFlavor(flavor)}
+                                        >
+                                            {flavor}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 後規格 */}
                         <div className="specs-section">
+                            <p style={{fontWeight:'bold', marginBottom:'5px'}}>規格：</p>
                             <div className="specs-list">
-                                {selectedGroup.map(item => (
+                                {displayedVariants.map(item => (
                                     <button key={item.id} className={`spec-btn ${selectedVariant.id === item.id ? 'active' : ''}`} onClick={() => setSelectedVariant(item)}>
                                         <span className="spec-text">{item.spec}</span>
                                         <span className="spec-price">${item.price_A}</span>
@@ -382,6 +431,7 @@ const ProductList = () => {
                                 ))}
                             </div>
                         </div>
+
                         <div className="qty-control-area">
                             <div className="qty-control">
                                 <button onClick={() => setQty(Math.max(1, qty - 1))}>-</button>
