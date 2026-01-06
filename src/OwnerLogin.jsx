@@ -595,6 +595,29 @@ function Owner() {
         }
     };
 
+    //  圖片上傳處理器
+    const handleFileUpload = async (e, targetSetter, currentData) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            // 顯示上傳中... (可選)
+            const res = await api.post('/api/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            // 上傳成功，更新狀態中的圖片檔名
+            targetSetter({ ...currentData, image: res.data.filename });
+            alert("圖片上傳成功！");
+        } catch (err) {
+            console.error(err);
+            alert("圖片上傳失敗");
+        }
+    };
+
     const handleImageError = (e) => {
         e.target.onerror = null;
         e.target.src = '/images/default.png';
@@ -1065,15 +1088,35 @@ function Owner() {
                     </div>
                 )}
 
-                {/* ⭐ 套組編輯 Modal (第一層) */}
+                {/*  套組編輯 Modal (第一層) */}
                 {isBundleModalOpen && (
                     <div className="modal-overlay">
                         <div className="modal-content" style={{ maxWidth: '700px' }}>
                             <h3>{editingBundleId ? '編輯套組' : '建立新套組'}</h3>
                             <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
                                 <div style={{ flex: 1 }}><label>名稱</label><input value={newBundle.title} onChange={e => setNewBundle({ ...newBundle, title: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }} placeholder="例如：早餐組合" /></div>
-                                <div style={{ flex: 1 }}><label>圖片</label><input value={newBundle.image} onChange={e => setNewBundle({ ...newBundle, image: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }} placeholder="bundle.jpg 或 URL" /></div>
-                            </div>
+                                <div style={{ flex: 1 }}>
+                                    <label>圖片</label>
+                                    <div style={{ display: 'flex', gap: '5px' }}>
+                                        <input
+                                            value={newBundle.image}
+                                            onChange={e => setNewBundle({ ...newBundle, image: e.target.value })}
+                                            style={{ flex: 1, padding: '8px' , borderRadius: '4px', border: '1px solid rgb(204, 204, 204)'}}
+                                            placeholder="輸入檔名或上傳"
+                                        />
+                                        {/* ⭐ 新增套組上傳按鈕 */}
+                                        <label className="btn-detail" style={{ cursor: 'pointer', background: '#e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                                            上傳
+                                            <input
+                                                type="file"
+                                                style={{ display: 'none' }}
+                                                accept="image/*"
+                                                onChange={(e) => handleFileUpload(e, setNewBundle, newBundle)}
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                                                            </div>
                             <div style={{ marginBottom: '15px' }}>
                                 <label style={{ marginRight: '10px' }}>模式：</label>
                                 <label style={{ marginRight: '15px' }}><input type="radio" checked={newBundle.filterType === 'manual'} onChange={() => setNewBundle({ ...newBundle, filterType: 'manual' })} /> 手動選品</label>
@@ -1217,27 +1260,49 @@ function Owner() {
                                 <div className="full-width" style={{ textAlign: 'center' }}>
                                     <img src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'} className="admin-product-img-preview" />
                                 </div>
+
+                                <div className="input-group">
+                                    <label>圖片</label>
+                                    <div style={{ display: 'flex', gap: '5px' }}>
+                                        <input
+                                            value={editingVariant.image || ''}
+                                            onChange={e => setEditingVariant({ ...editingVariant, image: e.target.value })}
+                                            placeholder="手動輸入或上傳"
+                                            style={{ flex: 1 }}
+                                        />
+                                        <label className="btn-detail" style={{ cursor: 'pointer', background: '#e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px', borderRadius: '4px' }}>
+                                            上傳
+                                            <input
+                                                type="file"
+                                                style={{ display: 'none' }}
+                                                accept="image/*"
+                                                onChange={(e) => handleFileUpload(e, setEditingVariant, editingVariant)}
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+
                                 <div className="input-group"><label>圖片檔名</label><input value={editingVariant.image || ''} onChange={e => setEditingVariant({ ...editingVariant, image: e.target.value })} /></div>
-                                <div className="input-group"><label>品名</label><input value={editingVariant.name} onChange={e => setEditingVariant({ ...editingVariant, name: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }} ><label>品名</label><input value={editingVariant.name} onChange={e => setEditingVariant({ ...editingVariant, name: e.target.value })} /></div>
                                 <div className="input-group"><label>別名 (Alias)</label><input value={editingVariant.alias || ''} onChange={e => setEditingVariant({ ...editingVariant, alias: e.target.value })} /></div>
                                 <div className="input-group"><label>品牌</label><input value={editingVariant.brand || ''} onChange={e => setEditingVariant({ ...editingVariant, brand: e.target.value })} /></div>
-                                <div className="input-group"><label>供應商</label><input value={editingVariant.saler || ''} onChange={e => setEditingVariant({ ...editingVariant, saler: e.target.value })} /></div>
-                                <div className="input-group"><label>主分類</label><input value={editingVariant.main_category || ''} onChange={e => setEditingVariant({ ...editingVariant, main_category: e.target.value })} /></div>
-                                <div className="input-group"><label>子分類</label><input value={editingVariant.sub_category || ''} onChange={e => setEditingVariant({ ...editingVariant, sub_category: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>供應商</label><input value={editingVariant.saler || ''} onChange={e => setEditingVariant({ ...editingVariant, saler: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>主分類</label><input value={editingVariant.main_category || ''} onChange={e => setEditingVariant({ ...editingVariant, main_category: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>子分類</label><input value={editingVariant.sub_category || ''} onChange={e => setEditingVariant({ ...editingVariant, sub_category: e.target.value })} /></div>
                                 <div className="input-group"><label>口味</label><input value={editingVariant.flavor || ''} onChange={e => setEditingVariant({ ...editingVariant, flavor: e.target.value })} /></div>
-                                <div className="input-group"><label>規格</label><input value={editingVariant.spec} onChange={e => setEditingVariant({ ...editingVariant, spec: e.target.value })} /></div>
-                                <div className="input-group"><label>單位</label><input value={editingVariant.unit || ''} onChange={e => setEditingVariant({ ...editingVariant, unit: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>規格</label><input value={editingVariant.spec} onChange={e => setEditingVariant({ ...editingVariant, spec: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>單位</label><input value={editingVariant.unit || ''} onChange={e => setEditingVariant({ ...editingVariant, unit: e.target.value })} /></div>
 
                                 {/* 價格與利潤區塊 */}
                                 <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
                                     <label>進貨成本 (Standard Cost)</label>
                                     <input type="number" value={editingVariant.standard_cost || 0} onChange={e => handleCostChange(e.target.value)} />
                                 </div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
+                                <div className="input-group">
                                     <label>建議售價 (Rec. Price)</label>
                                     <input type="number" value={editingVariant.rec_price || 0} onChange={e => setEditingVariant({ ...editingVariant, rec_price: e.target.value })} />
                                 </div>
-                                <div className="input-group"><label>售價 A (Price A)</label><input type="number" value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>售價 A (Price A)</label><input type="number" value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} /></div>
                                 <div className="input-group"><label>售價 B (Price B)</label><input type="number" value={editingVariant.price_B || 0} onChange={e => setEditingVariant({ ...editingVariant, price_B: e.target.value })} /></div>
                             </div>
                             <button className="change-btn" style={{ marginBottom: '10px', background: '#2196f3' }} onClick={applyProfitSettings}>套用利潤公式 (Price A = Cost x {profitRatio})</button>
