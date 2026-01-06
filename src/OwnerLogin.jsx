@@ -754,6 +754,10 @@ function Owner() {
 
     return (
         <div className="admin-container">
+            {/* ⭐ Hamburger Button */}
+            <button className="hamburger-btn" onClick={() => setIsMenuOpen(true)}>☰</button>
+            <div className={`sidebar-overlay ${isMenuOpen ? "active" : ""}`} onClick={() => setIsMenuOpen(false)}></div>
+            
             <nav className={`admin-sidebar ${isMenuOpen ? "open" : ""}`}>
                 <div className="sidebar-brand"><h3>管理後台</h3><button className="close-sidebar" onClick={() => setIsMenuOpen(false)}>×</button></div>
                 <div className="nav-menu">
@@ -777,7 +781,7 @@ function Owner() {
             <main className="admin-content">
                 {activeTab === "dashboard" && (
                     <div className="dashboard-view">
-                        <header className="content-header"><h2>數據分析</h2></header>
+                        <header className="content-header"><h2>DashBoard</h2></header>
                         <div className="stat-grid">
                             <div className="stat-card"><span>🚨 待處理訂單</span><strong style={{ color: '#e53935' }}>{stats.pendingCount} 筆</strong></div>
                             <div className="stat-card"><span>✅ 本日完成訂單</span><strong style={{ color: '#43a047' }}>{stats.todayCompleted} 筆</strong></div>
@@ -853,7 +857,9 @@ function Owner() {
                 )}
 
                 {activeTab === "products" && (
-                    <div className="product-page" style={{ paddingTop: '20px' }}>{/* ⭐ 利潤設定區塊 */}
+                    <div className="product-page" style={{ paddingTop: '0px' }}>
+                        <header className="content-header"><h2>商品管理</h2></header>
+                        {/* ⭐ 利潤設定區塊 */}
                         <div className="profit-settings">
                             <label><strong>全域利潤比例設定：</strong></label>
                             {isEditingProfit ? (
