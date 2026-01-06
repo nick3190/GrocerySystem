@@ -7,30 +7,25 @@ import './ProductList.css';
 const ProductList = () => {
     const navigate = useNavigate();
 
-    // --- 原始資料 ---
+    // 資料狀態
     const [rawProducts, setRawProducts] = useState([]);
     const [categoriesMap, setCategoriesMap] = useState({});
     const [brands, setBrands] = useState([]);
     const [cartCount, setCartCount] = useState(0);
-    
-    // ⭐ 新增：套組資料
     const [bundles, setBundles] = useState([]);
-    const [activeBundle, setActiveBundle] = useState(null); // 目前選中的套組
+    const [activeBundle, setActiveBundle] = useState(null);
 
-    // --- 篩選狀態 ---
+    // 篩選與分頁
     const [searchInput, setSearchInput] = useState(''); 
     const [activeSearch, setActiveSearch] = useState('');
-    
     const [selectedParent, setSelectedParent] = useState('全部');
     const [selectedChild, setSelectedChild] = useState('全部');
     const [selectedBrand, setSelectedBrand] = useState('全部');
     const [sortBy, setSortBy] = useState('default');
-
-    // --- 分頁狀態 ---
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 12;
 
-    // --- Modal 狀態 ---
+    // Modal
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState([]);
     const [selectedVariant, setSelectedVariant] = useState(null);
@@ -40,7 +35,7 @@ const ProductList = () => {
     useEffect(() => {
         fetchInitialData();
         fetchCartCount();
-        fetchBundles(); // 載入套組
+        fetchBundles();
     }, []);
 
     const fetchInitialData = async () => {
@@ -75,7 +70,7 @@ const ProductList = () => {
         setSelectedParent('全部');
         setSelectedChild('全部');
         setSelectedBrand('全部');
-        setActiveBundle(null); // 搜尋時退出套組模式
+        setActiveBundle(null);
         setCurrentPage(1);
     };
 
@@ -85,12 +80,10 @@ const ProductList = () => {
         setCurrentPage(1);
     };
 
-    // --- 套組操作 ---
     const handleViewBundle = (bundle) => {
         setActiveBundle(bundle);
-        setActiveSearch(''); // 清空搜尋
+        setActiveSearch('');
         setSelectedParent('全部');
-        // 頁面滾動到最上方
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -98,42 +91,69 @@ const ProductList = () => {
         setActiveBundle(null);
     };
 
-    // ⭐ 全部加入購物車 (批次)
-    const handleAddAllToCart = async (bundleProducts) => {
-        if (!window.confirm(`確定將 ${bundleProducts.length} 項商品全部加入購物車？`)) return;
+    // ⭐ 輔助函式：計算某個套組包含哪些商品 (不需進入頁面)
+    const getBundleItems = (bundle) => {
+        let items = [];
+        if (bundle.filter_type === 'manual' && bundle.product_ids) {
+            const ids = new Set(bundle.product_ids.split(',').map(Number));
+            items = rawProducts.filter(p => ids.has(Number(p.id)));
+        } else if (bundle.filter_type === 'category') {
+            items = rawProducts.filter(p => p.main_category === bundle.filter_value);
+        } else if (bundle.filter_type === 'search') {
+            const fuse = new Fuse(rawProducts, { keys: ['name', 'alias'], threshold: 0.3 });
+            items = fuse.search(bundle.filter_value).map(r => r.item);
+        }
+        return items;
+    };
 
-        // 整理 payload：自動選取每個群組的第一個規格
-        const itemsToAdd = bundleProducts.map(group => ({
-            productId: group.items[0].id, // 預設拿第一個規格
+    // ⭐ 全部加入 (批次)
+    const handleAddAllToCart = async (bundle) => {
+        // 如果傳入的是陣列(在套組頁面內)，直接使用；如果是 bundle 物件(在推薦卡片)，先計算商品
+        const productsToAdd = Array.isArray(bundle) ? bundle : getBundleItems(bundle);
+
+        if (productsToAdd.length === 0) return alert("此套組沒有商品");
+        if (!window.confirm(`確定將 ${productsToAdd.length} 項商品全部加入購物車？`)) return;
+
+        // 如果是 Group 物件(頁面內)，需取 group.items[0]；如果是原始 Product 物件(卡片)，直接用 id
+        const itemsPayload = productsToAdd.map(p => ({
+            productId: p.items ? p.items[0].id : p.id,
             quantity: 1,
             note: '套組快速加入'
         }));
 
         try {
-            await api.post('/cart/batch', { items: itemsToAdd });
+            await api.post('/cart/batch', { items: itemsPayload });
             alert("已全部加入購物車！");
             fetchCartCount();
         } catch (e) {
-            alert("部分商品加入失敗");
+            if (e.response && e.response.status === 401) {
+                alert("請先登入後再使用購物車功能");
+                navigate('/loginEntry');
+            } else {
+                alert("部分商品加入失敗");
+            }
         }
     };
 
-    // --- 核心邏輯 ---
+    // --- 核心篩選邏輯 ---
     const processedGroups = useMemo(() => {
         let filtered = rawProducts;
 
-        // ⭐ 1. 套組過濾優先
         if (activeBundle) {
-            // 依據套組設定過濾 (目前支援 category 或 search 關鍵字)
-            if (activeBundle.filter_type === 'category') {
+            if (activeBundle.filter_type === 'manual') {
+                if (activeBundle.product_ids) {
+                    const targetIds = new Set(activeBundle.product_ids.split(',').map(Number));
+                    filtered = filtered.filter(p => targetIds.has(Number(p.id)));
+                } else {
+                    filtered = [];
+                }
+            } else if (activeBundle.filter_type === 'category') {
                 filtered = filtered.filter(p => p.main_category === activeBundle.filter_value);
             } else if (activeBundle.filter_type === 'search') {
-                // 使用 Fuse 進行關鍵字匹配
                 const fuse = new Fuse(rawProducts, { keys: ['name', 'alias'], threshold: 0.3 });
                 filtered = fuse.search(activeBundle.filter_value).map(r => r.item);
             }
         } 
-        // 2. 若無套組，則走一般搜尋邏輯
         else if (activeSearch) {
             const fuse = new Fuse(rawProducts, {
                 keys: ['name', 'brand', 'spec', 'alias'], 
@@ -144,7 +164,6 @@ const ProductList = () => {
             filtered = fuse.search(activeSearch).map(result => result.item);
         }
 
-        // 3. 分類篩選 (套組模式下通常不使用，但保留邏輯無妨)
         filtered = filtered.filter(item => {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
@@ -190,7 +209,15 @@ const ProductList = () => {
             await api.post('/cart', { productId: selectedVariant.id, quantity: qty, note: note });
             setIsModalOpen(false);
             fetchCartCount();
-        } catch (err) { alert("加入失敗"); }
+        } catch (err) { 
+            if (err.response && err.response.status === 401) {
+                alert("請先登入後再使用購物車功能");
+                setIsModalOpen(false);
+                navigate('/loginEntry');
+            } else {
+                alert("加入失敗"); 
+            }
+        }
     };
 
     const handleImageError = (e) => {
@@ -220,7 +247,6 @@ const ProductList = () => {
                     <button className="history-link-btn" onClick={() => navigate('/historyPage')}>歷史訂單</button>
                 </div>
 
-                {/* ⭐ 僅在非套組模式下顯示篩選器 */}
                 {!activeBundle && (
                     <div className="filter-section">
                         <select value={selectedParent} onChange={(e) => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
@@ -244,16 +270,20 @@ const ProductList = () => {
                 )}
             </header>
 
-            {/* ⭐ 為您推薦區塊 (僅在首頁顯示) */}
             {!activeBundle && !activeSearch && bundles.length > 0 && (
                 <div className="recommendation-section">
                     <div className="recommendation-header">
-                        <h3>✨ 為您推薦：熱門商品套組</h3>
+                        <h3> 為您推薦：熱門商品套組</h3>
                     </div>
                     <div className="bundle-scroll-container">
                         {bundles.map(bundle => (
                             <div key={bundle.id} className="bundle-card" onClick={() => handleViewBundle(bundle)}>
-                                <img src={bundle.image || '/images/default_bundle.jpg'} className="bundle-bg" alt={bundle.title} />
+                                <img 
+                                    src={bundle.image && bundle.image.startsWith('http') ? bundle.image : `/images/${bundle.image || 'default_bundle.jpg'}`} 
+                                    className="bundle-bg" 
+                                    alt={bundle.title} 
+                                    onError={handleImageError}
+                                />
                                 <div className="bundle-overlay">
                                     <h4 className="bundle-title">{bundle.title}</h4>
                                     <div className="bundle-actions">
@@ -261,9 +291,8 @@ const ProductList = () => {
                                         <button 
                                             className="bundle-btn primary" 
                                             onClick={(e) => {
-                                                e.stopPropagation(); // 避免觸發進入頁面
-                                                handleViewBundle(bundle); // 先進入才能計算商品
-                                                // 這裡可以做更進階的直接加入，但為了確保邏輯簡單，先進入頁面再讓用戶按全部加入比較安全
+                                                e.stopPropagation(); // ⭐ 阻止冒泡
+                                                handleAddAllToCart(bundle); // ⭐ 傳入 bundle 物件
                                             }}
                                         >
                                             全部加入
@@ -276,7 +305,6 @@ const ProductList = () => {
                 </div>
             )}
 
-            {/* ⭐ 套組模式 Header */}
             {activeBundle && (
                 <div className="bundle-view-header">
                     <button className="back-btn" onClick={handleExitBundle}>

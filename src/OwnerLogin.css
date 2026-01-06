@@ -20,6 +20,22 @@
     transition: 0.3s ease;
 }
 
+/* 手機版側欄修正 */
+@media (max-width: 768px) {
+    .admin-sidebar {
+        position: fixed;
+        left: -280px; /* 預設隱藏 */
+        width: 260px;
+        transition: left 0.3s ease;
+    }
+    .admin-sidebar.open {
+        left: 0; /* 打開時滑入 */
+    }
+    .admin-content {
+        padding: 15px; /* 手機版內距縮小 */
+    }
+}
+
 .sidebar-brand {
     display: flex;
     justify-content: space-between;
@@ -52,15 +68,6 @@
     font-weight: bold;
 }
 
-.logout-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    padding: 10px;
-    border-radius: 5px;
-    cursor: pointer;
-}
-
 /* 主內容區 */
 .admin-content {
     flex: 1;
@@ -75,22 +82,6 @@
 }
 
 /* 數據卡片 */
-.stat-hero {
-    background: white;
-    padding: 40px;
-    border-radius: 20px;
-    box-shadow: var(--shadow);
-    text-align: center;
-    margin-bottom: 20px;
-    border-top: 5px solid var(--accent);
-}
-
-.stat-hero h1 {
-    font-size: 48px;
-    color: var(--primary);
-    margin: 10px 0;
-}
-
 .stat-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -136,6 +127,7 @@
     padding: 5px 10px;
     border-radius: 4px;
     margin-right: 5px;
+    cursor: pointer;
 }
 
 .btn-delete {
@@ -144,69 +136,10 @@
     border: none;
     padding: 5px 10px;
     border-radius: 4px;
+    cursor: pointer;
 }
 
-/* 手機版適配 (Responsive) */
-.mobile-header {
-    display: none;
-}
-
-.close-sidebar {
-    display: none;
-}
-
-@media (max-width: 768px) {
-    .admin-container {
-        flex-direction: column;
-    }
-
-    .mobile-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: var(--primary);
-        color: white;
-        padding: 15px;
-    }
-
-    .menu-toggle {
-        background: none;
-        border: none;
-        color: white;
-        font-size: 24px;
-    }
-
-    .admin-sidebar {
-        position: fixed;
-        left: -260px;
-        z-index: 2000;
-    }
-
-    .admin-sidebar.open {
-        left: 0;
-    }
-
-    .close-sidebar {
-        display: block;
-        background: none;
-        border: none;
-        color: white;
-        font-size: 30px;
-    }
-
-    .sidebar-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 1500;
-    }
-
-    .admin-content {
-        padding: 15px;
-    }
-}
-
-/* 登入頁面樣式 */
+/* 登入頁面 */
 .admin-login-wrapper {
     height: 100vh;
     display: flex;
@@ -224,12 +157,6 @@
     max-width: 400px;
 }
 
-.login-card h2 {
-    text-align: center;
-    color: var(--primary);
-    margin-bottom: 30px;
-}
-
 .input-group {
     margin-bottom: 15px;
 }
@@ -245,6 +172,7 @@
     padding: 12px;
     border: 1px solid #ddd;
     border-radius: 8px;
+    box-sizing: border-box; /* 確保padding不撐大寬度 */
 }
 
 .login-btn {
@@ -256,43 +184,23 @@
     border-radius: 8px;
     font-size: 16px;
     margin-top: 10px;
+    cursor: pointer;
 }
 
-.change-btn {
-    width: 100%;
-    padding: 15px;
-    background: var(--primary);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 16px;
-    margin-top: 10px;
-}
-
-
-/* 響應式商品網格 */
+/* 商品與套組卡片網格 */
 .product-grid {
     display: grid;
     gap: 15px;
     padding: 15px;
     grid-template-columns: repeat(2, 1fr);
-    /* 手機版預設  2 欄 */
 }
 
 @media (min-width: 768px) {
-    .product-grid {
-        grid-template-columns: repeat(4, 1fr);
-    }
-
-    .filter-section {
-        flex-direction: row;
-    }
+    .product-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
 @media (min-width: 1200px) {
-    .product-grid {
-        grid-template-columns: repeat(6, 1fr);
-    }
+    .product-grid { grid-template-columns: repeat(6, 1fr); }
 }
 
 .product-card {
@@ -304,7 +212,8 @@
     justify-content: space-between;
     transition: var(--transition);
     border: 1px solid #eee;
-    box-shadow: 0 0px 5px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0px 5px rgba(0, 0, 0, 0.05);
+    overflow: hidden; 
 }
 
 .product-card:hover {
@@ -312,7 +221,223 @@
     box-shadow: var(--shadow);
 }
 
-/* 新增：篩選按鈕樣式 */
+.admin-product-img-wrapper {
+    width: 100%;
+    height: 120px;
+    background-color: #f0f0f0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.admin-product-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Modal Overlay & Content */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+}
+
+/* 第二層 Modal (規格選擇) 要蓋在第一層上面 */
+.modal-overlay.second-level {
+    z-index: 2100;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.modal-content {
+    background: white;
+    padding: 25px;
+    border-radius: 15px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+}
+
+.modal-btns {
+    display: flex;
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.change-btn {
+    width: 100%;
+    padding: 10px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    margin-top: 10px;
+    cursor: pointer;
+}
+
+/* ⭐ 修正 save-btn 樣式 */
+.save-btn {
+    flex: 1; /* 讓按鈕均分寬度 */
+    padding: 10px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.cancel-btn {
+    flex: 1; /* 讓按鈕均分寬度 */
+    padding: 10px;
+    background: #eee;
+    color: #666;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.bundle-card {
+    width: 100%;
+    height: 100%;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    padding: 5px;
+    background: #fafafa;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+/* 套組新增卡片 */
+.new-bundle-card {
+    width: 100%;
+    height: 100%;
+    border: 2px dashed #ccc;
+    background: transparent;
+    border-radius: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    min-height: 250px;
+    transition: all 0.3s;
+    color: #888;
+}
+
+.new-bundle-card:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: rgba(0,0,0,0.02);
+}
+
+/* ⭐ 手動選品網格 */
+.selection-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 5px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.selection-card {
+    background: white;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    padding: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.selection-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.selection-card.selected {
+    border-color: #4caf50;
+    background-color: #f0fff4;
+}
+
+/* 綠勾勾 */
+.selection-card.selected::after {
+    content: '✔';
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: #4caf50;
+    color: white;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 12px;
+}
+
+.selection-img {
+    width: 100%;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: #eee;
+}
+
+.selection-info h5 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 規格列表 (第二層) */
+.product-select-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.product-select-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+
+.product-select-item:hover {
+    background: #f5f5f5;
+}
+
+@media (max-width: 600px) {
+    .selection-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 .filter-btn {
     padding: 8px 16px;
     background: white;
@@ -329,32 +454,18 @@
 }
 
 .filter-btn.active-filter {
-    background: var(--primary); /* 或您主題色 */
+    background: var(--primary);
     color: white;
     border-color: var(--primary);
     font-weight: bold;
 }
 
-/* ⭐ 新增：後台商品列表圖片樣式 */
-.product-card {
-    /* 確保卡片佈局支援圖片 */
-    overflow: hidden; 
-}
-
-.admin-product-img-wrapper {
-    width: 100%;
-    height: 120px; /* 後台可以稍微小一點 */
-    background-color: #f0f0f0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.admin-product-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+.close-sidebar {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
 }
 
 .modal-img-wrapper {
@@ -372,5 +483,5 @@
 .modal-product-img {
     width: 100%;
     height: 100%;
-    object-fit: contain; /* 確保完整顯示 */
+    object-fit: contain;
 }

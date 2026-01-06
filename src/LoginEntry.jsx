@@ -39,7 +39,6 @@ function LoginEntry() {
                     storeName: u.storeName || '',
                     address: u.address || ''
                 }));
-                // ⭐ 修正：不再更動 activeTab
             }
         } catch (e) { console.error("Lookup failed", e); }
     };
@@ -106,30 +105,29 @@ function LoginEntry() {
         checkLoginStatus();
     }, [navigate]);
 
-    // ⭐ 新增：彩蛋功能 (長按 d i c k 5秒)
+    // ⭐ 修正：彩蛋功能 (加入 e.key 存在檢查)
     useEffect(() => {
         const targetKeys = new Set(['d', 'i', 'c', 'k']);
         const pressed = new Set();
         let timer = null;
 
         const onKeyDown = (e) => {
-            if (targetKeys.has(e.key.toLowerCase())) {
+            // ⭐ 關鍵修正：確保 e.key 存在才執行 toLowerCase
+            if (e.key && targetKeys.has(e.key.toLowerCase())) {
                 pressed.add(e.key.toLowerCase());
             }
-            // 檢查是否同時按下了這四個鍵
             const allPressed = [...targetKeys].every(k => pressed.has(k));
             
             if (allPressed && !timer) {
                 console.log("Easter egg sequence detected! Hold for 5 seconds...");
                 timer = setTimeout(() => {
-                    // ⭐ 請將 '/owner' 替換為您真正的後台路徑
                     navigate('/ownerlogin'); 
                 }, 5000);
             }
         };
 
         const onKeyUp = (e) => {
-            if (targetKeys.has(e.key.toLowerCase())) {
+            if (e.key && targetKeys.has(e.key.toLowerCase())) {
                 pressed.delete(e.key.toLowerCase());
                 if (timer) {
                     clearTimeout(timer);

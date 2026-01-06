@@ -1,5 +1,5 @@
 .product-page {
-  padding-top: 180px; /* 為固定頂部預留空間 */
+  padding-top: 15vh; /* 為固定頂部預留空間 */
   min-height: 100vh;
 }
 
@@ -24,7 +24,7 @@
 }
 
 .top-banner h2 {
-  margin: 0;
+  margin: 10px 0;
   font-size: 1.2rem;
   align-self: flex-start; /* 標題靠左 */
 }
@@ -410,7 +410,7 @@
 }
 
 .recommendation-section {
-    margin: 20px 15px;
+    margin: 20px 0px;
 }
 
 .recommendation-header {
@@ -421,7 +421,7 @@
 }
 
 .recommendation-header h3 {
-    margin: 0;
+    margin: 10px 20px;
     color: var(--primary);
     font-size: 1.2rem;
     border-left: 4px solid var(--accent);
@@ -439,14 +439,16 @@
 
 /* 套組卡片 */
 .bundle-card {
-    flex: 0 0 280px; /* 固定寬度 */
-    height: 180px;
+    flex: 0 0 280px;
+    height: 220px; /* 增加高度 */
     border-radius: 12px;
     overflow: hidden;
     position: relative;
     box-shadow: 0 4px 10px rgba(0,0,0,0.15);
     cursor: pointer;
     transition: transform 0.2s;
+    z-index: 1; /* 基礎層級 */
+    margin: 10px 20px;
 }
 
 .bundle-card:hover {
@@ -457,7 +459,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    filter: brightness(0.7); /* 壓暗背景以凸顯文字 */
+    filter: brightness(0.7);
 }
 
 .bundle-overlay {
@@ -466,36 +468,42 @@
     left: 0;
     width: 100%;
     padding: 15px;
-    background: linear-gradient(transparent, rgba(0,0,0,0.8));
+    background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
     color: white;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     box-sizing: border-box;
-}
-
-.bundle-title {
-    margin: 0;
-    font-size: 1.2rem;
-    font-weight: bold;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    z-index: 2; 
+    pointer-events: none; /* ⭐ 關鍵：讓點擊穿透到按鈕 */
 }
 
 .bundle-actions {
     display: flex;
-    gap: 8px;
+    gap: 10px;
+    margin-top: 5px;
+    pointer-events: auto; /* ⭐ 恢復按鈕區域的點擊感應 */
+    position: relative;
+    z-index: 10;
 }
 
 .bundle-btn {
     flex: 1;
-    padding: 6px;
+    padding: 8px 0;
     border: 1px solid rgba(255,255,255,0.8);
-    background: rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.3);
     color: white;
     border-radius: 20px;
     font-size: 0.9rem;
     cursor: pointer;
     backdrop-filter: blur(4px);
+    transition: 0.2s;
+    position: relative; 
+    z-index: 20; /* 確保按鈕在最上層 */
+}
+
+.bundle-btn:hover {
+    background: rgba(255,255,255,0.2);
 }
 
 .bundle-btn.primary {
@@ -504,7 +512,11 @@
     font-weight: bold;
 }
 
-/* 套組模式下的 Header */
+.bundle-btn.primary:hover {
+    background: #ff7e67;
+}
+
+/* Bundle Header 樣式 */
 .bundle-view-header {
     background: var(--primary);
     color: white;
@@ -513,20 +525,9 @@
     justify-content: space-between;
     align-items: center;
     position: sticky;
-    top: 50px; /* 位於主 header 下方 */
+    top: 50px; 
     z-index: 90;
     box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-}
-
-.back-btn {
-    background: none;
-    border: none;
-    color: white;
-    font-size: 1rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 5px;
 }
 
 .bundle-add-all-btn {
@@ -537,4 +538,16 @@
     border-radius: 20px;
     font-weight: bold;
     cursor: pointer;
+    z-index: 100;
+}
+
+.back-btn {
+    background: white;
+    color: var(--primary);
+    border: none;
+    padding: 6px 15px;
+    border-radius: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 100;
 }
