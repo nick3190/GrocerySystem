@@ -568,3 +568,56 @@
     padding: 10px;
     cursor: pointer;
 }
+
+.delete-product-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background-color: #ffebee;
+    color: #c62828;
+    border: 1px solid #ffcdd2;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    z-index: 10;
+    transition: background 0.2s;
+}
+
+.delete-product-btn:hover {
+    background-color: #ef9a9a;
+    color: white;
+}
+
+/* ⭐ 新增：規格按鈕容器 (用於定位叉叉) */
+.variant-btn-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 8px;
+    margin-bottom: 5px;
+}
+
+/* 規格刪除叉叉 (預設隱藏) */
+.delete-variant-x {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 20px;
+    height: 20px;
+    background-color: #d32f2f;
+    color: white;
+    border-radius: 50%;
+    font-size: 12px;
+    display: none; /* 預設隱藏 */
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 5;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* 滑鼠移入容器時顯示叉叉 */
+.variant-btn-container:hover .delete-variant-x {
+    display: flex;
+}

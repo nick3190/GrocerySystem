@@ -50,6 +50,7 @@ function Owner() {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [editingGroup, setEditingGroup] = useState([]);
     const [editingVariant, setEditingVariant] = useState(null);
+    const [syncCommonFields, setSyncCommonFields] = useState(false);
 
     // --- 使用者管理狀態 ---
     const [expandedUserHistory, setExpandedUserHistory] = useState(null);
@@ -547,6 +548,51 @@ function Owner() {
         setEditingVariant(emptyProduct);
         setSyncCommonFields(false);
         setIsEditModalOpen(true);
+    };
+
+    //刪除單一規格
+    const handleDeleteVariant = async (e, variantId) => {
+        e.stopPropagation(); // 避免觸發切換規格
+        if (!confirm("確定刪除此規格？")) return;
+
+        try {
+            await api.delete(`/products/${variantId}`);
+
+            // 更新 UI state
+            const newGroup = editingGroup.filter(item => item.id !== variantId);
+
+            if (newGroup.length === 0) {
+                // 如果刪光了，關閉視窗並重整
+                setIsEditModalOpen(false);
+                fetchData();
+            } else {
+                setEditingGroup(newGroup);
+                // 如果刪除的是當前選中的，切換到剩下的一個
+                if (editingVariant.id === variantId) {
+                    setEditingVariant(newGroup[0]);
+                }
+                fetchData(); // 背景更新列表
+            }
+        } catch (err) {
+            alert("刪除失敗");
+        }
+    };
+
+    //刪除整個商品（所有規格）
+    const handleDeleteProduct = async () => {
+        if (!confirm(`⚠️ 確定要刪除商品「${editingVariant.name}」嗎？\n這將會刪除該商品底下的【所有規格】。\n此操作無法復原。`)) return;
+
+        try {
+            // 刪除群組內所有 ID
+            const promises = editingGroup.map(item => api.delete(`/products/${item.id}`));
+            await Promise.all(promises);
+
+            alert("商品已完整刪除");
+            setIsEditModalOpen(false);
+            fetchData();
+        } catch (err) {
+            alert("刪除失敗");
+        }
     };
 
     const handleImageError = (e) => {
@@ -1134,18 +1180,29 @@ function Owner() {
                 {isEditModalOpen && editingVariant && (
                     <div className="modal-overlay">
                         <div className="modal-content" style={{ maxWidth: '800px' }}>
+                            <button className="delete-product-btn" onClick={handleDeleteProduct}>
+                                🗑 刪除商品
+                            </button>
                             <h3>修改商品</h3>
                             <div className="specs-list" style={{ marginBottom: '15px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                                 {editingGroup.map(item => (
-                                    <button
-                                        key={item.id}
-                                        className={`filter-btn ${editingVariant.id === item.id ? 'active-filter' : ''}`}
-                                        onClick={() => setEditingVariant({ ...item })}
-                                        style={{ minWidth: '60px' }}
-                                    >
-                                        {/* ⭐ 修正邏輯：如果有口味就顯示口味，後面接規格 */}
-                                        {item.flavor ? `${item.flavor} - ` : ''}{item.spec}
-                                    </button>
+                                    <div key={item.id} className="variant-btn-container">
+                                        <button
+                                            className={`filter-btn ${editingVariant.id === item.id ? 'active-filter' : ''}`}
+                                            onClick={() => setEditingVariant({ ...item })}
+                                            style={{ minWidth: '60px' }}
+                                        >
+                                            {item.flavor ? `${item.flavor} - ` : ''}{item.spec}
+                                        </button>
+                                        {/* ⭐ 懸浮顯示的刪除叉叉 */}
+                                        <span
+                                            className="delete-variant-x"
+                                            onClick={(e) => handleDeleteVariant(e, item.id)}
+                                            title="刪除此規格"
+                                        >
+                                            ✕
+                                        </span>
+                                    </div>
                                 ))}
                                 {/* 預留新增按鈕功能 */}
                                 <button
