@@ -91,7 +91,6 @@ const ProductList = () => {
         setActiveBundle(null);
     };
 
-    // ⭐ 輔助函式：計算某個套組包含哪些商品 (不需進入頁面)
     const getBundleItems = (bundle) => {
         let items = [];
         if (bundle.filter_type === 'manual' && bundle.product_ids) {
@@ -106,15 +105,12 @@ const ProductList = () => {
         return items;
     };
 
-    // ⭐ 全部加入 (批次)
     const handleAddAllToCart = async (bundle) => {
-        // 如果傳入的是陣列(在套組頁面內)，直接使用；如果是 bundle 物件(在推薦卡片)，先計算商品
         const productsToAdd = Array.isArray(bundle) ? bundle : getBundleItems(bundle);
 
         if (productsToAdd.length === 0) return alert("此套組沒有商品");
         if (!window.confirm(`確定將 ${productsToAdd.length} 項商品全部加入購物車？`)) return;
 
-        // 如果是 Group 物件(頁面內)，需取 group.items[0]；如果是原始 Product 物件(卡片)，直接用 id
         const itemsPayload = productsToAdd.map(p => ({
             productId: p.items ? p.items[0].id : p.id,
             quantity: 1,
@@ -139,6 +135,7 @@ const ProductList = () => {
     const processedGroups = useMemo(() => {
         let filtered = rawProducts;
 
+        // 1. 套組過濾優先
         if (activeBundle) {
             if (activeBundle.filter_type === 'manual') {
                 if (activeBundle.product_ids) {
@@ -154,6 +151,7 @@ const ProductList = () => {
                 filtered = fuse.search(activeBundle.filter_value).map(r => r.item);
             }
         } 
+        // 2. 關鍵字搜尋
         else if (activeSearch) {
             const fuse = new Fuse(rawProducts, {
                 keys: ['name', 'brand', 'spec', 'alias'], 
@@ -164,6 +162,7 @@ const ProductList = () => {
             filtered = fuse.search(activeSearch).map(result => result.item);
         }
 
+        // 3. 分類篩選 (現在即使在套組模式下也會執行，實現「套組內篩選」)
         filtered = filtered.filter(item => {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
@@ -247,33 +246,32 @@ const ProductList = () => {
                     <button className="history-link-btn" onClick={() => navigate('/historyPage')}>歷史訂單</button>
                 </div>
 
-                {!activeBundle && (
-                    <div className="filter-section">
-                        <select value={selectedParent} onChange={(e) => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
-                            <option value="全部">所有分類</option>
-                            {Object.keys(categoriesMap).map(cat => (<option key={cat} value={cat}>{cat}</option>))}
-                        </select>
-                        <select value={selectedChild} onChange={(e) => setSelectedChild(e.target.value)}>
-                            <option value="全部">所有子分類</option>
-                            {selectedParent !== '全部' && categoriesMap[selectedParent]?.map(sub => (<option key={sub} value={sub}>{sub}</option>))}
-                        </select>
-                        <select value={selectedBrand} onChange={(e) => setSelectedBrand(e.target.value)}>
-                            <option value="全部">所有品牌</option>
-                            {brands.map(b => (<option key={b} value={b}>{b}</option>))}
-                        </select>
-                        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                            <option value="default">預設排序</option>
-                            <option value="price_asc">價格由低到高</option>
-                            <option value="price_desc">價格由高到低</option>
-                        </select>
-                    </div>
-                )}
+                {/* ⭐ 修正：移除 !activeBundle 判斷，讓篩選欄在套組模式下也顯示 */}
+                <div className="filter-section">
+                    <select value={selectedParent} onChange={(e) => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
+                        <option value="全部">所有分類</option>
+                        {Object.keys(categoriesMap).map(cat => (<option key={cat} value={cat}>{cat}</option>))}
+                    </select>
+                    <select value={selectedChild} onChange={(e) => setSelectedChild(e.target.value)}>
+                        <option value="全部">所有子分類</option>
+                        {selectedParent !== '全部' && categoriesMap[selectedParent]?.map(sub => (<option key={sub} value={sub}>{sub}</option>))}
+                    </select>
+                    <select value={selectedBrand} onChange={(e) => setSelectedBrand(e.target.value)}>
+                        <option value="全部">所有品牌</option>
+                        {brands.map(b => (<option key={b} value={b}>{b}</option>))}
+                    </select>
+                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                        <option value="default">預設排序</option>
+                        <option value="price_asc">價格由低到高</option>
+                        <option value="price_desc">價格由高到低</option>
+                    </select>
+                </div>
             </header>
 
             {!activeBundle && !activeSearch && bundles.length > 0 && (
                 <div className="recommendation-section">
                     <div className="recommendation-header">
-                        <h3> 為您推薦：熱門商品套組</h3>
+                        <h3>✨ 為您推薦：熱門商品套組</h3>
                     </div>
                     <div className="bundle-scroll-container">
                         {bundles.map(bundle => (
@@ -291,8 +289,8 @@ const ProductList = () => {
                                         <button 
                                             className="bundle-btn primary" 
                                             onClick={(e) => {
-                                                e.stopPropagation(); // ⭐ 阻止冒泡
-                                                handleAddAllToCart(bundle); // ⭐ 傳入 bundle 物件
+                                                e.stopPropagation(); 
+                                                handleAddAllToCart(bundle); 
                                             }}
                                         >
                                             全部加入
