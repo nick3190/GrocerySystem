@@ -477,11 +477,76 @@ function Owner() {
     const saveProductChanges = async () => {
         if (!editingVariant) return;
         try {
-            await api.put(`/products/${editingVariant.id}`, editingVariant);
-            alert("修改成功");
-            setRawProducts(prev => prev.map(p => p.id === editingVariant.id ? editingVariant : p));
-            setEditingGroup(prev => prev.map(p => p.id === editingVariant.id ? editingVariant : p));
-        } catch (e) { alert("修改失敗"); }
+            if (editingVariant.id) {
+                // --- 舊商品：執行更新 (PUT) ---
+                await api.put(`/products/${editingVariant.id}`, editingVariant);
+
+                // 同步更新邏輯 (保持不變)
+                if (syncCommonFields) {
+                    const commonFields = {
+                        name: editingVariant.name,
+                        brand: editingVariant.brand,
+                        image: editingVariant.image,
+                        main_category: editingVariant.main_category,
+                        sub_category: editingVariant.sub_category,
+                        saler: editingVariant.saler,
+                        alias: editingVariant.alias
+                    };
+                    const otherIds = editingGroup.filter(i => i.id && i.id !== editingVariant.id).map(i => i.id);
+                    const promises = otherIds.map(id => api.put(`/products/${id}`, { ...editingGroup.find(i => i.id === id), ...commonFields }));
+                    await Promise.all(promises);
+                    alert("修改成功 (含同步更新)");
+                } else {
+                    alert("修改成功");
+                }
+            } else {
+                // --- 新商品：執行新增 (POST) ---
+                await api.post("/products", editingVariant);
+                alert("新增成功");
+            }
+
+            // 重新抓取資料並關閉視窗
+            fetchData();
+            setIsEditModalOpen(false);
+        } catch (e) {
+            console.error(e);
+            alert("儲存失敗");
+        }
+    };
+
+    //建立新規格
+    const handleAddNewVariant = () => {
+        if (!editingVariant) return;
+
+        // 建立一個新物件，複製大部分欄位，但清空規格相關欄位
+        const newVariant = {
+            ...editingVariant,
+            id: null, // 標記為新商品
+            spec: '', // 清空規格讓用戶填
+            flavor: '',
+            price_A: editingVariant.price_A || 0,
+            price_B: editingVariant.price_B || 0
+        };
+
+        // 將這個暫存的新規格加入編輯群組，並設為當前編輯對象
+        setEditingGroup(prev => [...prev, newVariant]);
+        setEditingVariant(newVariant);
+    };
+
+    //建立新產品
+    const handleCreateProduct = () => {
+        const emptyProduct = {
+            id: null,
+            name: '',
+            brand: '',
+            spec: '',
+            price_A: 0,
+            // ...其他欄位會由 input 自動填入 undefined/empty
+        };
+        setEditingGroup([emptyProduct]); // 群組只有它自己
+        setEditingVariant(emptyProduct);
+        setSyncCommonFields(false);
+        setIsEditModalOpen(true);
     };
 
     const handleImageError = (e) => {
@@ -766,6 +831,12 @@ function Owner() {
                             </select>
                         </div>
                         <div className="product-grid">
+                            <div className="new-bundle-card" onClick={handleCreateProduct}>
+                                <div style={{ textAlign: 'center' }}>
+                                    <span style={{ fontSize: '3rem', display: 'block' }}>＋</span>
+                                    <span>建立新商品</span>
+                                </div>
+                            </div>
                             {currentProdData.map(group => (
                                 <div key={group.name} className="product-card">
                                     <div className="admin-product-img-wrapper">
@@ -1064,6 +1135,27 @@ function Owner() {
                     <div className="modal-overlay">
                         <div className="modal-content" style={{ maxWidth: '800px' }}>
                             <h3>修改商品</h3>
+                            <div className="specs-list" style={{ marginBottom: '15px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                {editingGroup.map(item => (
+                                    <button
+                                        key={item.id}
+                                        className={`filter-btn ${editingVariant.id === item.id ? 'active-filter' : ''}`}
+                                        onClick={() => setEditingVariant({ ...item })}
+                                        style={{ minWidth: '60px' }}
+                                    >
+                                        {/* ⭐ 修正邏輯：如果有口味就顯示口味，後面接規格 */}
+                                        {item.flavor ? `${item.flavor} - ` : ''}{item.spec}
+                                    </button>
+                                ))}
+                                {/* 預留新增按鈕功能 */}
+                                <button
+                                    className="filter-btn"
+                                    style={{ borderStyle: 'dashed', color: '#888' }}
+                                    onClick={handleAddNewVariant}
+                                >
+                                    + 新增規格
+                                </button>
+                            </div>
                             <div className="edit-grid-form">
                                 <div className="full-width" style={{ textAlign: 'center' }}>
                                     <img src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'} className="admin-product-img-preview" />

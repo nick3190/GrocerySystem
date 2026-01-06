@@ -840,6 +840,24 @@ app.post("/api/admin/login", (req, res) => {
 		});
 	}
 });
+
+app.post("/products", async (req, res) => {
+    const { name, price_A, price_B, spec, unit, brand, image, flavor, rec_price, standard_cost, saler, alias, main_category, sub_category } = req.body;
+    try {
+        const result = await pool.query(
+            `INSERT INTO products 
+            (name, "price_A", "price_B", spec, unit, brand, image, flavor, rec_price, standard_cost, saler, alias, main_category, sub_category)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            RETURNING *`,
+            [name, price_A || 0, price_B || 0, spec || '', unit || '', brand || '', image || '', flavor || '', rec_price || 0, standard_cost || 0, saler || '', alias || '', main_category || '', sub_category || '']
+        );
+        res.json({ message: "新增成功", product: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "新增失敗" });
+    }
+});
+
 app.use((req, res, next) => {
 	if (req.path.startsWith("/api")) return next();
 	res.sendFile(path.join(distPath, "index.html"));
