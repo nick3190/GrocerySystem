@@ -680,3 +680,34 @@
         width: 100%;
     }
 }
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    .print-modal-content, .print-modal-content * {
+        visibility: visible;
+    }
+    .print-modal-content {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        box-shadow: none !important;
+        border: none !important;
+    }
+    /* 隱藏列印視窗內的按鈕 */
+    .no-print {
+        display: none !important;
+    }
+}
+
+/* 預覽視窗樣式 */
+.print-preview-box {
+    border: 1px solid #ddd;
+    padding: 20px;
+    margin: 15px 0;
+    max-height: 60vh;
+    overflow-y: auto;
+    background: white;
+}

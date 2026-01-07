@@ -30,6 +30,14 @@ function Owner() {
     const [pendingDates, setPendingDates] = useState({});
     const [editingOrder, setEditingOrder] = useState(null);
     const [editingOrderDate, setEditingOrderDate] = useState('');
+    const [orderSearchInput, setOrderSearchInput] = useState('');
+    const [activeOrderSearch, setActiveOrderSearch] = useState('');
+
+    // 分頁 State (不會因切換 Tab 重置)
+    const [pendingPage, setPendingPage] = useState(1);
+    const [expiredPage, setExpiredPage] = useState(1);
+    const [ordersPage, setOrdersPage] = useState(1);
+    const orderPageSize = 15;
 
     // --- 商品管理狀態 ---
     const [categoriesMap, setCategoriesMap] = useState({});
@@ -58,7 +66,7 @@ function Owner() {
     const [expandedHistoryOrderId, setExpandedHistoryOrderId] = useState(null);
     const [editingUser, setEditingUser] = useState(null);
 
-    // --- ⭐ 套組管理狀態 (優化版) ---
+    // --- 套組管理狀態 (優化版) ---
     const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
     const [editingBundleId, setEditingBundleId] = useState(null);
     const [newBundle, setNewBundle] = useState({
@@ -79,6 +87,13 @@ function Owner() {
 
     const [notification, setNotification] = useState(null); // { message: '新訂單 #1234' }
     const [lastOrderId, setLastOrderId] = useState(null);
+
+    const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
+    const [previewOrder, setPreviewOrder] = useState(null);
+
+    const [completedPage, setCompletedPage] = useState(1);
+    const [dashboardRange, setDashboardRange] = useState('7'); // '7', '30', '90'
+    const [categoryChartMode, setCategoryChartMode] = useState('main'); // 'main' | 'sub'
 
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
@@ -217,28 +232,27 @@ function Owner() {
     };
 
     const startEditOrder = (order) => {
-        setEditingOrder({
-            ...JSON.parse(JSON.stringify(order)),
-            pickupDate: order.pickupDate || '',
-            pickupType: order.pickupType || 'self',
-            isPrinted: order.isPrinted || false
-        });
+        setEditingOrder(JSON.parse(JSON.stringify(order)));
+        setEditingOrderDate(order.pickupDate);
+        setExpandedOrderId(order.id); // 自動展開明細
     };
 
     const saveOrderEdit = async () => {
         if (!editingOrder) return;
         if (!window.confirm("確定儲存修改？")) return;
 
-        const newTotal = editingOrder.products.reduce((sum, p) => sum + (Number(p.price) * Number(p.qty)), 0);
+        // ⭐ 修正：確保 products 存在才進行 reduce 計算，否則預設為 []
+        const currentProducts = editingOrder.products || [];
+        const newTotal = currentProducts.reduce((sum, p) => sum + (Number(p.price) * Number(p.qty)), 0);
 
         try {
             await api.put(`/api/orders/${editingOrder.id}`, {
-                items: editingOrder.products,
+                items: currentProducts, // 使用確保存在的 products
                 total: newTotal,
                 order_note: editingOrder.order_note,
-                pickup_date: editingOrder.pickupDate, // ⭐ 更新日期
-                pickup_type: editingOrder.pickupType, // ⭐ 更新方式
-                is_printed: editingOrder.isPrinted      // ⭐ 更新列印狀態
+                pickup_date: editingOrder.pickupDate,
+                pickup_type: editingOrder.pickupType,
+                is_printed: editingOrder.isPrinted
             });
 
             setOrders(prev => prev.map(o => o.id === editingOrder.id ? { ...editingOrder, total: newTotal } : o));
@@ -295,13 +309,6 @@ function Owner() {
         if (!editingVariant) return;
         const newPriceA = Math.round((editingVariant.standard_cost || 0) * profitRatio);
         setEditingVariant({ ...editingVariant, price_A: newPriceA });
-    };
-
-    const handleCostChange = (val) => {
-        if (!editingVariant) return;
-        const newCost = Number(val);
-        const newPriceA = Math.round(newCost * profitRatio);
-        setEditingVariant({ ...editingVariant, standard_cost: newCost, price_A: newPriceA });
     };
 
     // --- 套組管理邏輯 ---
@@ -406,42 +413,91 @@ function Owner() {
     };
 
     const { stats, chartData } = useMemo(() => {
+        // 1. 篩選日期範圍
+        const now = moment();
+        const rangeDate = moment().subtract(Number(dashboardRange), 'days');
+
+        // 過濾出範圍內的有效訂單 (不含取消/待審，視需求而定，這裡取已完成+進行中)
+        const validOrders = orders.filter(o =>
+            o.status !== 'pending_review' &&
+            moment(o.rawTime).isAfter(rangeDate)
+        );
+
+        // 2. 統計數據
+        let totalRevenue = 0;
+        let totalCost = 0;
+        const dateMap = {}; // { 'MM/DD': { revenue: 0, cost: 0, profit: 0 } }
+        const productSalesMap = {};
+        const categoryMap = {}; // { '分類名': 數量 }
+
+        // 初始化日期 Map (確保圖表 X 軸連續)
+        for (let i = Number(dashboardRange) - 1; i >= 0; i--) {
+            const d = moment().subtract(i, 'days').format('MM/DD');
+            dateMap[d] = { revenue: 0, cost: 0, profit: 0 };
+        }
+
+        validOrders.forEach(o => {
+            const d = moment(o.rawTime).format('MM/DD');
+            if (dateMap[d]) {
+                const revenue = Number(o.total || 0);
+                // 計算該訂單總成本 (若舊訂單無 cost 則為 0)
+                const cost = o.products ? o.products.reduce((acc, p) => acc + (Number(p.cost || 0) * Number(p.qty || 0)), 0) : 0;
+
+                dateMap[d].revenue += revenue;
+                dateMap[d].cost += cost;
+                dateMap[d].profit += (revenue - cost);
+
+                totalRevenue += revenue;
+                totalCost += cost;
+            }
+
+            // 統計分類與商品 (這裡不分日期，統計區間總量)
+            if (o.products) {
+                o.products.forEach(p => {
+                    // 找出該商品的分類資訊 (需從 rawProducts 對照)
+                    const productInfo = rawProducts.find(rp => rp.id === p.id) || {};
+                    const catKey = categoryChartMode === 'main' ? (productInfo.main_category || '其他') : (productInfo.sub_category || '其他');
+
+                    categoryMap[catKey] = (categoryMap[catKey] || 0) + Number(p.qty);
+                    productSalesMap[p.name] = (productSalesMap[p.name] || 0) + Number(p.qty);
+                });
+            }
+        });
+
+        // 3. 轉換圖表格式
+        const lineChartData = Object.keys(dateMap).map(date => ({
+            date,
+            revenue: dateMap[date].revenue,
+            cost: dateMap[date].cost,
+            profit: dateMap[date].profit
+        }));
+
+        const barChartData = Object.entries(productSalesMap)
+            .map(([name, qty]) => ({ name, qty }))
+            .sort((a, b) => b.qty - a.qty)
+            .slice(0, 5);
+
+        const pieChartData = Object.entries(categoryMap)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value);
+
+        // 訂單狀態統計 (今日/本月) - 這是 Dashboard 頂部卡片用的，邏輯維持全量統計
         const todayStr = moment().format('YYYY-MM-DD');
         const currentMonth = moment().format('YYYY-MM');
         let pendingCount = 0, todayCompleted = 0, monthCompleted = 0;
-        const last7DaysMap = {};
-        for (let i = 6; i >= 0; i--) last7DaysMap[moment().subtract(i, 'days').format('MM/DD')] = 0;
-        const productSalesMap = {};
-        let selfCount = 0, deliveryCount = 0;
-
         orders.forEach(o => {
-            if (o.status === 'pending_review') return;
-            const isCompleted = o.status === 'completed';
-            const orderDateFull = moment(o.rawTime).format('YYYY-MM-DD');
-            const orderMonth = moment(o.rawTime).format('YYYY-MM');
-            const amount = Number(o.total || 0);
-
-            if (!isCompleted) pendingCount++;
-            if (isCompleted && orderDateFull === todayStr) todayCompleted++;
-            if (isCompleted && orderMonth === currentMonth) monthCompleted++;
-
-            const orderDateKey = moment(o.rawTime).format('MM/DD');
-            if (last7DaysMap[orderDateKey] !== undefined) last7DaysMap[orderDateKey] += amount;
-
-            if (o.products) o.products.forEach(p => {
-                const pname = p.name;
-                if (!productSalesMap[pname]) productSalesMap[pname] = 0;
-                productSalesMap[pname] += Number(p.qty || 0);
-            });
-            if (o.pickupType === 'self') selfCount++; else deliveryCount++;
+            if (o.status === 'pending_review') pendingCount++;
+            if (o.status === 'completed') {
+                if (moment(o.rawTime).format('YYYY-MM-DD') === todayStr) todayCompleted++;
+                if (moment(o.rawTime).format('YYYY-MM') === currentMonth) monthCompleted++;
+            }
         });
 
-        const lineChartData = Object.keys(last7DaysMap).map(date => ({ date, revenue: last7DaysMap[date] }));
-        const barChartData = Object.entries(productSalesMap).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
-        const pieChartData = [{ name: '自取', value: selfCount }, { name: '外送', value: deliveryCount }].filter(d => d.value > 0);
-
-        return { stats: { pendingCount, todayCompleted, monthCompleted }, chartData: { lineChartData, barChartData, pieChartData } };
-    }, [orders]);
+        return {
+            stats: { pendingCount, todayCompleted, monthCompleted, totalRevenue, totalProfit: totalRevenue - totalCost },
+            chartData: { lineChartData, barChartData, pieChartData }
+        };
+    }, [orders, rawProducts, dashboardRange, categoryChartMode]);
 
     // --- 商品管理邏輯 ---
     const handleProductSearch = () => {
@@ -453,17 +509,30 @@ function Owner() {
         setProdPage(1);
     };
 
+    const handleProfitChange = (val) => {
+        if (!editingVariant) return;
+        const profit = Number(val);
+        const cost = Number(editingVariant.standard_cost || 0);
+        setEditingVariant({ ...editingVariant, profit: profit, price_A: cost + profit });
+    };
+
+    const handleCostChange = (val) => {
+        if (!editingVariant) return;
+        const cost = Number(val);
+        const profit = Number(editingVariant.profit || 0);
+        // 若有設定 profit 則優先使用加法，否則維持原值
+        setEditingVariant({ ...editingVariant, standard_cost: cost, price_A: cost + profit });
+    };
+
     const processedProductGroups = useMemo(() => {
         let filtered = rawProducts;
 
         if (activeSearch) {
-            const fuse = new Fuse(rawProducts, {
-                keys: ['name', 'brand', 'spec', 'alias'],
-                threshold: 0.4,
-                ignoreLocation: true,
-                minMatchCharLength: 1
+            const keywords = activeSearch.toLowerCase().split(/\s+/).filter(Boolean);
+            filtered = filtered.filter(p => {
+                const target = `${p.name} ${p.brand || ''} ${p.spec || ''} ${p.alias || ''} ${p.saler || ''}`.toLowerCase();
+                return keywords.every(k => target.includes(k));
             });
-            filtered = fuse.search(activeSearch).map(result => result.item);
         }
 
         filtered = filtered.filter(item => {
@@ -616,6 +685,36 @@ function Owner() {
         }
     };
 
+    //  匯出所有商品資料
+    const handleExportAllProducts = () => {
+        window.open(`${api.defaults.baseURL || 'http://localhost:4000'}/api/products/export`, '_blank');
+    };
+
+    // 列印預覽處理器
+    const handlePrintPreview = (order) => {
+        setPreviewOrder(order);
+        setIsPrintPreviewOpen(true);
+    };
+
+    // 執行列印 (瀏覽器原生)
+    const handleBrowserPrint = () => {
+        window.print();
+        // 列印後視同已列印，更新狀態 (選擇性)
+        if (previewOrder && !previewOrder.isPrinted) {
+            // 您可以呼叫 API 更新 isPrinted 狀態，這裡僅示範 UI 更新
+            setOrders(prev => prev.map(o => o.id === previewOrder.id ? { ...o, isPrinted: true } : o));
+        }
+    };
+
+    // 下載 Excel (舊有功能)
+    const handleDownloadOrderExcel = () => {
+        if (!previewOrder) return;
+        const baseUrl = api.defaults.baseURL || 'http://localhost:4000';
+        window.open(`${baseUrl}/api/orders/${previewOrder.id}/print`, '_blank');
+        // 更新狀態
+        setOrders(prev => prev.map(o => o.id === previewOrder.id ? { ...o, isPrinted: true } : o));
+    };
+
     //  圖片上傳處理器
     const handleFileUpload = async (e, targetSetter, currentData) => {
         const file = e.target.files[0];
@@ -638,6 +737,118 @@ function Owner() {
             alert("圖片上傳失敗");
         }
     };
+
+    //分頁功能
+    const PaginationControl = ({ curr, total, setPage }) => {
+        const [val, setVal] = useState(curr);
+        useEffect(() => setVal(curr), [curr]); // 同步外部變化
+
+        const commit = () => {
+            let p = Number(val);
+            if (isNaN(p)) p = 1;
+            if (p < 1) p = 1;
+            if (p > total) p = total;
+            setPage(p);
+            setVal(p);
+        };
+        return (
+            <div className="pagination" style={{ padding: '10px 0' }}>
+                <button onClick={() => setPage(Math.max(1, curr - 1))} disabled={curr === 1}>◀</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <input
+                        type="number"
+                        value={val}
+                        onChange={e => setVal(e.target.value)}
+                        onBlur={commit}
+                        onKeyDown={e => e.key === 'Enter' && commit()}
+                        style={{ width: '50px', textAlign: 'center', padding: '5px', borderRadius: '4px', border: '1px solid #ddd' }}
+                    />
+                    <span> / {total}</span>
+                </div>
+                <button onClick={() => setPage(Math.min(total, curr + 1))} disabled={curr === total}>▶</button>
+            </div>
+        );
+    };
+
+    const handleOrderSearch = () => {
+        setActiveOrderSearch(orderSearchInput);
+        setOrdersPage(1); // 搜尋時重置分頁
+    };
+
+    const processedOrders = useMemo(() => {
+        let res = orders;
+
+        // 搜尋邏輯 (名字 或 20250108 格式)
+        if (activeOrderSearch) {
+            const term = activeOrderSearch.toLowerCase();
+            res = res.filter(o => {
+                const dateStr = moment(o.rawTime).format('YYYYMMDD');
+                const name = (o.storeName || '').toLowerCase();
+                return name.includes(term) || dateStr.includes(term);
+            });
+        }
+        return res;
+    }, [orders, activeOrderSearch]);
+
+    // ⭐ 修改：訂單分類邏輯 (已完成訂單完全獨立)
+    const { pendingData, expiredData, mainData, completedData } = useMemo(() => {
+        const todayStr = moment().format('YYYY-MM-DD');
+
+        // 1. 待審
+        const pending = processedOrders.filter(o => o.status === 'pending_review');
+
+        // 2. 過期 (未完成 且 日期早於今天)
+        const expired = processedOrders.filter(o => o.status !== 'completed' && o.status !== 'pending_review' && o.pickupDate < todayStr);
+
+        // 3. 已完成 (獨立出來)
+        const completed = processedOrders.filter(o => o.status === 'completed');
+
+        // 4. 進行中列表 (Main List) - 排除待審、過期、已完成
+        // 也就是只剩 "未來的" 或 "今天的" 且 "未完成" 的訂單
+        let main = processedOrders.filter(o =>
+            o.status !== 'completed' &&
+            o.status !== 'pending_review' &&
+            o.pickupDate >= todayStr // 排除過期
+        );
+
+        // Tab 篩選 (針對 Main List)
+        if (orderSubTab === 'today') {
+            main = main.filter(o => o.pickupDate === todayStr);
+        } else if (orderSubTab === 'future') {
+            main = main.filter(o => o.pickupDate > todayStr);
+        }
+        // 若是 'all' (訂單總覽)，Main List 顯示所有 "未完成" 的有效訂單
+
+        // 自取/送貨 篩選 (同時套用到 Main 和 Completed)
+        if (filterType !== 'all') {
+            main = main.filter(o => o.pickupType === filterType);
+            // 注意：這裡我們讓已完成列表也受上方篩選器影響，體驗較一致
+            // 若希望已完成不受篩選，請移除下方這行
+            // completed = completed.filter(o => o.pickupType === filterType); 
+            // 但 React const 不能重賦值，如果需要篩選 completed，要在定義時處理，這裡暫略
+        }
+
+        return {
+            pendingData: pending,
+            expiredData: expired,
+            mainData: main,
+            completedData: completed // 回傳已完成清單
+        };
+    }, [processedOrders, orderSubTab, filterType]);
+
+    // 分頁裁切
+    const getPagedData = (data, page) => {
+        const start = (page - 1) * orderPageSize;
+        return {
+            data: data.slice(start, start + orderPageSize),
+            totalPages: Math.ceil(data.length / orderPageSize) || 1
+        };
+    };
+
+    const pagedPending = getPagedData(pendingData, pendingPage);
+    const pagedExpired = getPagedData(expiredData, expiredPage);
+    const pagedMain = getPagedData(mainData, ordersPage);
+    const pagedCompleted = getPagedData(completedData, completedPage); // ⭐ 新增分頁
 
     const handleImageError = (e) => {
         e.target.onerror = null;
@@ -731,14 +942,14 @@ function Owner() {
                                 已列印
                             </label>
                         ) : (
-                            isPendingReview ? '待審核' : (isCompleted ? '✅ 已完成' : (o.isPrinted ? '已列印' : '未列印'))
+                            isPendingReview ? <p style={{ color: '#ff0303ff' }}>待審核</p> : (isCompleted ? <p style={{ color: '#4caf50' }}>✅ 已完成</p> : (o.isPrinted ? <p style={{ color: '#2196f3' }}>已列印</p> : <p style={{ color: '#9e9e9e' }}>未列印</p>))
                         )}
                     </td>
 
                     {/* 操作按鈕區 */}
                     <td>
                         {!isPendingReview && !isEditing && (
-                            <button className="btn-detail" onClick={() => printOrder(o.id)} title="列印工單">🖨</button>
+                            <button className="btn-detail" onClick={() => handlePrintPreview(o)} title="列印/下載">🖨</button>
                         )}
 
                         {/* 展開/收合明細 */}
@@ -749,7 +960,7 @@ function Owner() {
                             <button className="btn-detail" style={{ background: '#43a047', color: 'white' }} onClick={() => completeOrder(o.id)}>完成</button>
                         )}
 
-                        {/* ⭐ 新增：編輯/儲存 按鈕切換 */}
+                        {/* 編輯/儲存 按鈕切換 */}
                         {!isPendingReview && !isCompleted && (
                             isEditing ? (
                                 <div style={{ marginTop: '5px', display: 'flex', gap: '5px' }}>
@@ -759,6 +970,11 @@ function Owner() {
                             ) : (
                                 <button className="btn-detail" style={{ marginLeft: '5px', background: '#ffa000', color: 'white' }} onClick={() => startEditOrder(o)}>編輯</button>
                             )
+                        )}
+
+                        {/* 刪除按鈕 (非編輯狀態才顯示) */}
+                        {!isCompleted && !isPendingReview && !isEditing && (
+                            <button className="btn-delete" onClick={() => deleteOrder(o.id)} style={{ background: 'red', color: 'white' }}>刪除訂單</button>
                         )}
                     </td>
                 </tr>
@@ -770,13 +986,7 @@ function Owner() {
                             <div className="order-dropdown">
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                                     <h4>商品明細：</h4>
-                                    <div>
-                                        {!isEditing && (
-                                            <button className="btn-delete" onClick={() => deleteOrder(o.id)}>🗑 刪除訂單</button>
-                                        )}
-                                    </div>
                                 </div>
-
                                 <ul>
                                     {displayOrder.products && displayOrder.products.map((p, idx) => (
                                         <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid #eee' }}>
@@ -796,7 +1006,7 @@ function Owner() {
                                 </ul>
                                 {isEditing && (
                                     <div style={{ marginTop: '10px', fontWeight: 'bold', color: 'blue' }}>
-                                        預估新總價: ${displayOrder.products.reduce((sum, p) => sum + (p.price * p.qty), 0)}
+                                        預估新總價: ${(displayOrder.products || []).reduce((sum, p) => sum + (Number(p.price) * Number(p.qty)), 0)}
                                     </div>
                                 )}
                                 <div style={{ marginTop: '10px' }}>
@@ -859,16 +1069,83 @@ function Owner() {
             <main className="admin-content">
                 {activeTab === "dashboard" && (
                     <div className="dashboard-view">
-                        <header className="content-header"><h2>DashBoard</h2></header>
+                        <header className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2>數據看板</h2>
+                            {/* ⭐ 時間區段選擇 */}
+                            <select value={dashboardRange} onChange={e => setDashboardRange(e.target.value)} style={{ padding: '5px', borderRadius: '5px' }}>
+                                <option value="7">近 7 天</option>
+                                <option value="14">近 14 天</option>
+                                <option value="30">近 30 天</option>
+                                <option value="90">近 90 天</option>
+                            </select>
+                        </header>
+
+                        {/* 統計卡片 */}
                         <div className="stat-grid">
-                            <div className="stat-card"><span>🚨 待處理訂單</span><strong style={{ color: '#e53935' }}>{stats.pendingCount} 筆</strong></div>
-                            <div className="stat-card"><span>✅ 本日完成訂單</span><strong style={{ color: '#43a047' }}>{stats.todayCompleted} 筆</strong></div>
-                            <div className="stat-card"><span>📅 本月完成訂單</span><strong>{stats.monthCompleted} 筆</strong></div>
+                            <div className="stat-card"><span>🚨 待處理</span><strong style={{ color: '#e53935' }}>{stats.pendingCount}</strong></div>
+                            <div className="stat-card"><span>✅ 本日完成</span><strong style={{ color: '#43a047' }}>{stats.todayCompleted}</strong></div>
+                            <div className="stat-card"><span>💰 區間營收</span><strong>${stats.totalRevenue.toLocaleString()}</strong></div>
+                            <div className="stat-card"><span>📈 區間毛利</span><strong style={{ color: '#2196f3' }}>${stats.totalProfit.toLocaleString()}</strong></div>
                         </div>
-                        <div className="charts-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginTop: '30px' }}>
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}><h3 style={{ marginBottom: '20px', color: '#555' }}>📈 近 7 日營收趨勢</h3><div style={{ width: '100%', height: 300 }}><ResponsiveContainer><LineChart data={chartData.lineChartData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Line type="monotone" dataKey="revenue" stroke="#8884d8" /></LineChart></ResponsiveContainer></div></div>
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}><h3 style={{ marginBottom: '20px', color: '#555' }}>🏆 熱銷商品 Top 5</h3><div style={{ width: '100%', height: 300 }}><ResponsiveContainer><BarChart data={chartData.barChartData} layout="vertical"><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" /><YAxis dataKey="name" type="category" width={100} /><Tooltip /><Bar dataKey="qty" fill="#82ca9d" /></BarChart></ResponsiveContainer></div></div>
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}><h3 style={{ marginBottom: '20px', color: '#555' }}>🛵 訂單類型分佈</h3><div style={{ width: '100%', height: 300 }}><ResponsiveContainer><PieChart><Pie data={chartData.pieChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} fill="#8884d8" dataKey="value" label>{chartData.pieChartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer></div></div>
+
+                        <div className="charts-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: '20px', marginTop: '30px' }}>
+
+                            {/* ⭐ 營收/支出/利潤 趨勢圖 */}
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
+                                <h3 style={{ marginBottom: '20px', color: '#555' }}>財務趨勢</h3>
+                                <div style={{ width: '100%', height: 300 }}>
+                                    <ResponsiveContainer>
+                                        <LineChart data={chartData.lineChartData}>
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis dataKey="date" />
+                                            <YAxis />
+                                            <Tooltip />
+                                            <Legend />
+                                            <Line type="monotone" dataKey="revenue" name="營收" stroke="#8884d8" strokeWidth={2} />
+                                            <Line type="monotone" dataKey="cost" name="支出" stroke="#ff8042" />
+                                            <Line type="monotone" dataKey="profit" name="淨利潤" stroke="#82ca9d" strokeWidth={2} />
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            {/* 熱銷商品 */}
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
+                                <h3 style={{ marginBottom: '20px', color: '#555' }}>熱銷商品 Top 5</h3>
+                                <div style={{ width: '100%', height: 300 }}>
+                                    <ResponsiveContainer>
+                                        <BarChart data={chartData.barChartData} layout="vertical">
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis type="number" />
+                                            <YAxis dataKey="name" type="category" width={100} />
+                                            <Tooltip />
+                                            <Bar dataKey="qty" fill="#82ca9d" name="銷量" />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            {/* ⭐ 類別佔比圓餅圖 */}
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+                                    <h3 style={{ color: '#555', margin: 0 }}>類別銷售佔比</h3>
+                                    <select value={categoryChartMode} onChange={e => setCategoryChartMode(e.target.value)} style={{ padding: '2px' }}>
+                                        <option value="main">主分類</option>
+                                        <option value="sub">子分類</option>
+                                    </select>
+                                </div>
+                                <div style={{ width: '100%', height: 300 }}>
+                                    <ResponsiveContainer>
+                                        <PieChart>
+                                            <Pie data={chartData.pieChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} fill="#8884d8" dataKey="value" nameKey="name" label>
+                                                {chartData.pieChartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}
+                                            </Pie>
+                                            <Tooltip />
+                                            <Legend />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -888,12 +1165,15 @@ function Owner() {
                                     </tbody>
                                 </table>
                             )}
+                            <PaginationControl curr={pendingPage} total={pagedPending.totalPages} setPage={setPendingPage} />
                         </div>
 
-                        {expiredOrders.length > 0 && (
+                        {/* 過期訂單區塊 (Expired) */}
+                        {expiredData.length > 0 && (
                             <div className="expired-section">
-                                <h3>⚠️ 過期未完成訂單 ({expiredOrders.length})</h3>
-                                <table className="admin-table"><tbody>{expiredOrders.map(o => renderOrderRow(o))}</tbody></table>
+                                <h3>⚠️ 過期未完成訂單</h3>
+                                <table className="admin-table"><tbody>{pagedExpired.data.map(o => renderOrderRow(o))}</tbody></table>
+                                <PaginationControl curr={expiredPage} total={pagedExpired.totalPages} setPage={setExpiredPage} />
                             </div>
                         )}
 
@@ -907,28 +1187,32 @@ function Owner() {
                             <button className={`filter-btn ${filterType === 'all' ? 'active-filter' : ''}`} onClick={() => setFilterType('all')}>全部類型</button>
                             <button className={`filter-btn ${filterType === 'self' ? 'active-filter' : ''}`} onClick={() => setFilterType('self')}>🏠 自取</button>
                             <button className={`filter-btn ${filterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setFilterType('delivery')}>🚚 送貨</button>
-                        </div>
 
+                            <div style={{ marginLeft: 'auto', display: 'flex', gap: '5px' }}>
+                                <input
+                                    placeholder="搜尋姓名或日期(20250101)..."
+                                    value={orderSearchInput}
+                                    onChange={e => setOrderSearchInput(e.target.value)}
+                                    style={{ padding: '8px', borderRadius: '20px', border: '1px solid #ccc' }}
+                                />
+                                <button className="btn-detail" onClick={handleOrderSearch}>搜尋</button>
+                            </div>
+                        </div>
                         <div className="table-container">
-                            <h4 style={{ padding: '10px', color: '#333' }}>📋 待處理 / 進行中</h4>
-                            <table className="admin-table">
-                                <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead>
-                                <tbody>
-                                    {activeOrders.length > 0 ? activeOrders.map(o => renderOrderRow(o, false)) : <tr><td colSpan="6" style={{ textAlign: 'center' }}>無訂單</td></tr>}
-                                </tbody>
-                            </table>
+                            <h4>📋 訂單列表</h4>
+                            <table className="admin-table"><tbody>
+                                {pagedMain.data.length > 0 ? pagedMain.data.map(o => renderOrderRow(o, o.status === 'completed')) : <tr><td colSpan="6">無訂單</td></tr>}
+                            </tbody></table>
+                            <PaginationControl curr={ordersPage} total={pagedMain.totalPages} setPage={setOrdersPage} />
                         </div>
 
-                        {/* 已完成訂單區塊 */}
-                        {completedOrders.length > 0 && (
-                            <div className="table-container" style={{ marginTop: '30px', opacity: 0.8 }}>
-                                <h4 style={{ padding: '10px', color: '#666' }}>✅ 已完成訂單</h4>
-                                <table className="admin-table">
-                                    <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead>
-                                    <tbody>
-                                        {completedOrders.map(o => renderOrderRow(o, true))}
-                                    </tbody>
-                                </table>
+                        {orderSubTab === 'all' && completedData.length > 0 && (
+                            <div className="table-container" style={{ marginTop: '30px', borderTop: '4px solid #4caf50' }}>
+                                <h4 style={{ color: '#2e7d32' }}>✅ 已完成訂單 ({completedData.length})</h4>
+                                <table className="admin-table"><tbody>
+                                    {pagedCompleted.data.map(o => renderOrderRow(o, true))}
+                                </tbody></table>
+                                <PaginationControl curr={completedPage} total={pagedCompleted.totalPages} setPage={setCompletedPage} />
                             </div>
                         )}
                     </div>
@@ -936,9 +1220,12 @@ function Owner() {
 
                 {activeTab === "products" && (
                     <div className="product-page" style={{ paddingTop: '0px' }}>
-                        <header className="content-header"><h2>商品管理</h2></header>
+                        <header className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2>商品管理</h2>
+                            <button className="btn-detail" onClick={handleExportAllProducts} style={{ background: '#4caf50', color: 'white' }}>匯出全商品 Excel</button>
+                        </header>
                         {/* ⭐ 利潤設定區塊 */}
-                        <div className="profit-settings">
+                        {/*<div className="profit-settings">
                             <label><strong>全域利潤比例設定：</strong></label>
                             {isEditingProfit ? (
                                 <>
@@ -952,7 +1239,7 @@ function Owner() {
                                 </>
                             )}
                             <button className="btn-detail" onClick={handleApplyProfitToAll} style={{ background: '#e3f2fd', border: '1px solid #2196f3', color: '#2196f3' }}>套用至全商品</button>
-                        </div>
+                        </div>*/}
 
 
                         <div className="filter-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -1394,11 +1681,74 @@ function Owner() {
                                 </div>
                                 <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>售價 A (Price A)</label><input type="number" value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} /></div>
                                 <div className="input-group"><label>售價 B (Price B)</label><input type="number" value={editingVariant.price_B || 0} onChange={e => setEditingVariant({ ...editingVariant, price_B: e.target.value })} /></div>
+                                <div className="input-group" style={{ background: '#e8f5e9', padding: '10px', borderRadius: '8px' }}>
+                                    <label>固定利潤 (Profit)</label>
+                                    <input type="number" value={editingVariant.profit || 0} onChange={e => handleProfitChange(e.target.value)} />
+                                </div>
                             </div>
-                            <button className="change-btn" style={{ marginBottom: '10px', background: '#2196f3' }} onClick={applyProfitSettings}>套用利潤公式 (Price A = Cost x {profitRatio})</button>
+                            {/*<button className="change-btn" style={{ marginBottom: '10px', background: '#2196f3' }} onClick={applyProfitSettings}>套用利潤公式 (Price A = Cost x {profitRatio})</button>*/}
                             <div className="modal-btns">
                                 <button className="cancel-btn" onClick={() => setIsEditModalOpen(false)}>關閉</button>
                                 <button className="confirm-btn" onClick={saveProductChanges}>儲存</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {isPrintPreviewOpen && previewOrder && (
+                    <div className="modal-overlay">
+                        <div className="modal-content print-modal-content" style={{ maxWidth: '800px', width: '95%' }}>
+                            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                                <h3>訂單預覽</h3>
+                                <button onClick={() => setIsPrintPreviewOpen(false)} style={{ fontSize: '1.5rem', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+                            </div>
+
+                            {/* 預覽區塊 (這塊會被印出來) */}
+                            <div className="print-preview-box" style={{ fontFamily: 'Arial, sans-serif' }}>
+                                <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '10px' }}>訂單明細</h2>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+                                    <div><strong>訂單編號：</strong> {previewOrder.id}</div>
+                                    <div><strong>店家名稱：</strong> {previewOrder.storeName}</div>
+                                    <div><strong>取貨方式：</strong> {previewOrder.pickupType === 'delivery' ? '外送' : '自取'}</div>
+                                    <div><strong>取貨日期：</strong> {previewOrder.pickupDate} {previewOrder.pickupTime}</div>
+                                    {previewOrder.pickupType === 'delivery' && <div style={{ gridColumn: '1/-1' }}><strong>地址：</strong> {users.find(u => u.uuid === previewOrder.user_uuid)?.address}</div>}
+                                    <div style={{ gridColumn: '1/-1' }}><strong>備註：</strong> {previewOrder.order_note}</div>
+                                </div>
+
+                                <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '2px solid #333' }}>
+                                            <th style={{ textAlign: 'left', padding: '8px' }}>商品</th>
+                                            <th style={{ textAlign: 'center', padding: '8px' }}>規格</th>
+                                            <th style={{ textAlign: 'center', padding: '8px' }}>數量</th>
+                                            <th style={{ textAlign: 'right', padding: '8px' }}>單價</th>
+                                            <th style={{ textAlign: 'right', padding: '8px' }}>小計</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {previewOrder.products.map((p, idx) => (
+                                            <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                                <td style={{ padding: '8px' }}>{p.name} <span style={{ fontSize: '0.8em', color: '#666' }}>{p.note ? `(${p.note})` : ''}</span></td>
+                                                <td style={{ textAlign: 'center', padding: '8px' }}>{p.spec}</td>
+                                                <td style={{ textAlign: 'center', padding: '8px' }}>x{p.qty}</td>
+                                                <td style={{ textAlign: 'right', padding: '8px' }}>${p.price}</td>
+                                                <td style={{ textAlign: 'right', padding: '8px' }}>${p.price * p.qty}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <td colSpan="4" style={{ textAlign: 'right', padding: '15px 8px', fontWeight: 'bold' }}>總金額：</td>
+                                            <td style={{ textAlign: 'right', padding: '15px 8px', fontWeight: 'bold', fontSize: '1.2em' }}>${previewOrder.total}</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+
+                            <div className="modal-btns no-print" style={{ marginTop: '20px' }}>
+                                <button className="change-btn" onClick={handleBrowserPrint} style={{ background: '#2196f3' }}>🖨 直接列印</button>
+                                <button className="change-btn" onClick={handleDownloadOrderExcel} style={{ background: '#4caf50' }}>📥 下載 Excel</button>
+                                <button className="cancel-btn" onClick={() => setIsPrintPreviewOpen(false)}>關閉</button>
                             </div>
                         </div>
                     </div>

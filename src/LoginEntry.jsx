@@ -24,6 +24,10 @@ function LoginEntry() {
     const [customDate, setCustomDate] = useState('');
     const [pickupTime, setPickupTime] = useState('');
 
+    //自取時間計算
+    const today = new Date().toISOString().split('T')[0];
+    const maxDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
     const handleInputChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
@@ -44,8 +48,8 @@ function LoginEntry() {
     };
 
     const handleSendOTP = async () => {
-        if (!formData.storeName || !formData.phone) return alert("請填寫店家名稱與手機");
-        if (activeTab === 'delivery' && !formData.address) return alert("外送請填寫地址");
+        if (!formData.storeName || !formData.phone) return alert("請填寫取貨人 or 店家名稱與手機");
+        if (activeTab === 'delivery' && !formData.address) return alert("送貨請填寫地址");
         if (activeTab === 'self') {
             if (pickupDateType === 'custom' && !customDate) return alert("請選擇取貨日期");
             if (!pickupTime) return alert("請選擇取貨時段");
@@ -107,7 +111,7 @@ function LoginEntry() {
 
     // ⭐ 修正：彩蛋功能 (加入 e.key 存在檢查)
     useEffect(() => {
-        const targetKeys = new Set(['d', 'i', 'c', 'k']);
+        const targetKeys = new Set(['y', 'u', 'a', 'n']);
         const pressed = new Set();
         let timer = null;
 
@@ -117,11 +121,11 @@ function LoginEntry() {
                 pressed.add(e.key.toLowerCase());
             }
             const allPressed = [...targetKeys].every(k => pressed.has(k));
-            
+
             if (allPressed && !timer) {
                 console.log("Easter egg sequence detected! Hold for 5 seconds...");
                 timer = setTimeout(() => {
-                    navigate('/ownerlogin'); 
+                    navigate('/ownerlogin');
                 }, 5000);
             }
         };
@@ -171,7 +175,7 @@ function LoginEntry() {
                 {step === 1 && (
                     <div className="tabs">
                         <button className={activeTab === 'self' ? 'active' : ''} onClick={() => setActiveTab('self')}>自取</button>
-                        <button className={activeTab === 'delivery' ? 'active' : ''} onClick={() => setActiveTab('delivery')}>外送</button>
+                        <button className={activeTab === 'delivery' ? 'active' : ''} onClick={() => setActiveTab('delivery')}>送貨</button>
                     </div>
                 )}
 
@@ -186,7 +190,7 @@ function LoginEntry() {
                                 onBlur={handlePhoneBlur}
                                 className="main-input"
                             />
-                            <input name="storeName" placeholder="店家名稱" value={formData.storeName} onChange={handleInputChange} className="main-input" />
+                            <input name="storeName" placeholder="取貨人 or 店家名稱" value={formData.storeName} onChange={handleInputChange} className="main-input" />
 
                             {activeTab === 'delivery' && (
                                 <input name="address" placeholder="送貨地址" value={formData.address} onChange={handleInputChange} className="main-input" />
@@ -200,7 +204,7 @@ function LoginEntry() {
                                         <label><input type="radio" name="dateType" checked={pickupDateType === 'custom'} onChange={() => setPickupDateType('custom')} /> 指定日期</label>
                                     </div>
                                     {pickupDateType === 'custom' && (
-                                        <input type="date" className="main-input" value={customDate} onChange={(e) => setCustomDate(e.target.value)} />
+                                        <input type="date" min={today} max={maxDate} className="main-input" value={customDate} onChange={(e) => setCustomDate(e.target.value)} />
                                     )}
                                     <p style={{ marginTop: '10px' }}>選擇時段：</p>
                                     <select className="main-input" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}>

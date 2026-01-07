@@ -271,6 +271,47 @@ app.post("/api/products/apply-profit", async (req, res) => {
         });
     }
 });
+
+// 匯出所有商品為 Excel
+app.get("/api/products/export", async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM products ORDER BY id');
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('商品列表');
+
+        // 設定表頭
+        sheet.columns = [
+            { header: 'ID', key: 'id', width: 10 },
+            { header: '品名', key: 'name', width: 30 },
+            { header: '規格', key: 'spec', width: 15 },
+            { header: '口味', key: 'flavor', width: 15 },
+            { header: '品牌', key: 'brand', width: 15 },
+            { header: '分類', key: 'main_category', width: 15 },
+            { header: '子分類', key: 'sub_category', width: 15 },
+            { header: '供應商', key: 'saler', width: 20 },
+            { header: '成本', key: 'standard_cost', width: 10 },
+            { header: '售價A', key: 'price_A', width: 10 },
+            { header: '售價B', key: 'price_B', width: 10 },
+            { header: '建議售價', key: 'rec_price', width: 10 },
+            { header: '單位', key: 'unit', width: 10 },
+            { header: '別名', key: 'alias', width: 20 },
+        ];
+
+        // 填入資料
+        result.rows.forEach(p => {
+            sheet.addRow(p);
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=all_products_${Date.now()}.xlsx`);
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("匯出失敗");
+    }
+});
+
 // --- 套組 (Bundles) API ---
 app.get("/api/bundles", async (req, res) => {
     try {
@@ -639,10 +680,14 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         if (!finalPickupDate) finalPickupDate = null;
         let finalPickupTime = pickupTime || dbUser.pickup_time;
         if (!finalPickupTime) finalPickupTime = null;
-        const cartRes = await pool.query(`SELECT c.*, p.name, p."price_A", p."price_B", p.image, p.flavor FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1`, [req.user.uuid]);
-        if (cartRes.rows.length === 0) return res.status(400).json({
-            message: "Empty"
-        });
+        const cartRes = await pool.query(`
+            SELECT c.*, p.name, p."price_A", p."price_B", p.image, p.flavor, p.standard_cost 
+            FROM cart_items c 
+            JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
+            WHERE c.user_uuid = $1
+        `, [req.user.uuid]);
+        if (cartRes.rows.length === 0) return res.status(400).json({ message: "Empty" });
+
         const isB = dbUser.price_tier === 'B';
         const total = cartRes.rows.reduce((sum, item) => sum + (Number(isB ? item.price_B : item.price_A) * item.quantity), 0);
         const itemsJson = cartRes.rows.map(item => ({
@@ -651,6 +696,7 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
             qty: item.quantity,
             note: item.note,
             price: isB ? item.price_B : item.price_A,
+            cost: item.standard_cost || 0, // 紀錄成本
             image: item.image,
             flavor: item.flavor
         }));
@@ -936,3 +982,17 @@ app.use((req, res, next) => {
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });
+
+
+const deleteOldOrders = async () => {
+    try {
+        // Postgres 語法:刪除 created_at 早於 3 個月前的資料
+        await pool.query("DELETE FROM orders WHERE created_at < NOW() - INTERVAL '3 months'");
+        console.log("Old orders cleanup executed.");
+    } catch (e) {
+        console.error("Cleanup Error:", e);
+    }
+};
+// 啟動時執行一次，並設定每 24 小時執行一次 (86400000 ms)
+deleteOldOrders();
+setInterval(deleteOldOrders, 86400000);

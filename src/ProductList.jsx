@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from './api';
 import { useNavigate } from 'react-router-dom';
-import Fuse from 'fuse.js'; 
+import Fuse from 'fuse.js';
 import './ProductList.css';
 
 const ProductList = () => {
@@ -14,7 +14,7 @@ const ProductList = () => {
     const [bundles, setBundles] = useState([]);
     const [activeBundle, setActiveBundle] = useState(null);
 
-    const [searchInput, setSearchInput] = useState(''); 
+    const [searchInput, setSearchInput] = useState('');
     const [activeSearch, setActiveSearch] = useState('');
     const [selectedParent, setSelectedParent] = useState('全部');
     const [selectedChild, setSelectedChild] = useState('全部');
@@ -28,7 +28,9 @@ const ProductList = () => {
     const [selectedVariant, setSelectedVariant] = useState(null);
     const [qty, setQty] = useState(1);
     const [note, setNote] = useState('');
-    
+
+    const [userPhone, setUserPhone] = useState('');
+
     // ⭐ 雙層規格狀態
     const [selectedFlavor, setSelectedFlavor] = useState(null);
 
@@ -36,6 +38,9 @@ const ProductList = () => {
         fetchInitialData();
         fetchCartCount();
         fetchBundles();
+        api.get('/api/me').then(res => {
+            if (res.data.isAuthenticated) setUserPhone(res.data.user.phone);
+        });
     }, []);
 
     const fetchInitialData = async () => {
@@ -92,7 +97,7 @@ const ProductList = () => {
     };
 
     const handleLogout = async () => {
-        try { await api.post('/logout'); } catch(e){}
+        try { await api.post('/logout'); } catch (e) { }
         navigate('/loginEntry');
     };
 
@@ -153,15 +158,14 @@ const ProductList = () => {
                 const fuse = new Fuse(rawProducts, { keys: ['name', 'alias'], threshold: 0.3 });
                 filtered = fuse.search(activeBundle.filter_value).map(r => r.item);
             }
-        } 
+        }
         else if (activeSearch) {
-            const fuse = new Fuse(rawProducts, {
-                keys: ['name', 'brand', 'spec', 'alias'], 
-                threshold: 0.4, 
-                ignoreLocation: true,
-                minMatchCharLength: 1
+            const keywords = activeSearch.toLowerCase().split(/\s+/).filter(Boolean); // 切割空白鍵
+            filtered = filtered.filter(p => {
+                const target = `${p.name} ${p.brand || ''} ${p.spec || ''} ${p.alias || ''}`.toLowerCase();
+                // 檢查是否「所有」關鍵字都存在於目標字串中
+                return keywords.every(k => target.includes(k));
             });
-            filtered = fuse.search(activeSearch).map(result => result.item);
         }
 
         filtered = filtered.filter(item => {
@@ -186,7 +190,7 @@ const ProductList = () => {
             const items = groups[name];
             const minPrice = Math.min(...items.map(i => Number(i.price_A) || 0));
             const mainImg = items[0].image || null;
-            
+
             // 提取所有 flavor
             const flavors = [...new Set(items.map(i => i.flavor).filter(Boolean))];
 
@@ -202,13 +206,13 @@ const ProductList = () => {
 
     const handleCardClick = (group) => {
         setSelectedGroup(group.items);
-        
+
         // ⭐ 預設選取第一個有庫存的 (或第一個)
         // 且如果有口味，設定第一個口味
         const first = group.items[0];
         setSelectedVariant(first);
         setSelectedFlavor(first.flavor || null);
-        
+
         setQty(1);
         setNote('');
         setIsModalOpen(true);
@@ -220,13 +224,13 @@ const ProductList = () => {
             await api.post('/cart', { productId: selectedVariant.id, quantity: qty, note: note });
             setIsModalOpen(false);
             fetchCartCount();
-        } catch (err) { 
+        } catch (err) {
             if (err.response && err.response.status === 401) {
                 alert("請先登入後再使用購物車功能");
                 setIsModalOpen(false);
                 navigate('/loginEntry');
             } else {
-                alert("加入失敗"); 
+                alert("加入失敗");
             }
         }
     };
@@ -251,21 +255,53 @@ const ProductList = () => {
         return [...new Set(selectedGroup.map(i => i.flavor).filter(Boolean))];
     }, [selectedGroup]);
 
+    //分頁功能
+    const PaginationControl = ({ curr, total, setPage }) => {
+        const [val, setVal] = useState(curr);
+        useEffect(() => setVal(curr), [curr]);
+        const commit = () => {
+            let p = Number(val);
+            if (isNaN(p)) p = 1;
+            if (p < 1) p = 1;
+            if (p > total) p = total;
+            setPage(p);
+            setVal(p);
+        };
+        return (
+            <div className="pagination">
+                <button onClick={() => setPage(Math.max(1, curr - 1))} disabled={curr === 1}>上一頁</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <input
+                        type="number"
+                        value={val}
+                        onChange={e => setVal(e.target.value)}
+                        onBlur={commit}
+                        onKeyDown={e => e.key === 'Enter' && commit()}
+                        className="page-input" // 需在 CSS 設定寬度
+                        style={{ width: '50px', textAlign: 'center', padding: '8px', borderRadius: '5px', border: '1px solid #ddd' }}
+                    />
+                    <span> / {total}</span>
+                </div>
+                <button onClick={() => setPage(Math.min(total, curr + 1))} disabled={curr === total}>下一頁</button>
+            </div>
+        );
+    };
+
     return (
         <div className="product-page">
             <header className="sticky-header">
                 <div className="top-banner">
                     {/* ⭐ 左上角登出 */}
-                    <button className="logout-link" onClick={handleLogout}>登出</button>
-                    
-                    <h2>商品列表</h2>
+                    <button className="logout-link" onClick={handleLogout}>登出系統</button>
+                    {userPhone && <h2>用戶：{userPhone}</h2>}
+                    {/*<h2>商品列表</h2>*/}
                     <div className="search-wrapper">
                         <input
                             type="text"
                             placeholder="輸入關鍵字..."
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()} 
+                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                             className="search-input"
                         />
                         {searchInput && (
@@ -306,21 +342,21 @@ const ProductList = () => {
                     <div className="bundle-scroll-container">
                         {bundles.map(bundle => (
                             <div key={bundle.id} className="bundle-card" onClick={() => handleViewBundle(bundle)}>
-                                <img 
-                                    src={bundle.image && bundle.image.startsWith('http') ? bundle.image : `/images/${bundle.image || 'default_bundle.jpg'}`} 
-                                    className="bundle-bg" 
-                                    alt={bundle.title} 
+                                <img
+                                    src={bundle.image && bundle.image.startsWith('http') ? bundle.image : `/images/${bundle.image || 'default_bundle.jpg'}`}
+                                    className="bundle-bg"
+                                    alt={bundle.title}
                                     onError={handleImageError}
                                 />
                                 <div className="bundle-overlay">
                                     <h4 className="bundle-title">{bundle.title}</h4>
                                     <div className="bundle-actions">
                                         <button className="bundle-btn">查看套組</button>
-                                        <button 
-                                            className="bundle-btn primary" 
+                                        <button
+                                            className="bundle-btn primary"
                                             onClick={(e) => {
-                                                e.stopPropagation(); 
-                                                handleAddAllToCart(bundle); 
+                                                e.stopPropagation();
+                                                handleAddAllToCart(bundle);
                                             }}
                                         >
                                             全部加入
@@ -338,7 +374,7 @@ const ProductList = () => {
                     <button className="back-btn" onClick={handleExitBundle}>
                         ⬅ 返回列表
                     </button>
-                    <span style={{fontWeight:'bold', fontSize:'1.1rem'}}>{activeBundle.title}</span>
+                    <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{activeBundle.title}</span>
                     <button className="bundle-add-all-btn" onClick={() => handleAddAllToCart(processedGroups)}>
                         全部加入 ({processedGroups.length})
                     </button>
@@ -349,8 +385,8 @@ const ProductList = () => {
                 {currentData.length > 0 ? currentData.map((group) => (
                     <div key={group.name} className="product-card" onClick={() => handleCardClick(group)}>
                         <div className="product-card-img-wrapper">
-                            <img 
-                                src={group.mainImg ? `/images/${group.mainImg}` : '/images/default.png'} 
+                            <img
+                                src={group.mainImg ? `/images/${group.mainImg}` : '/images/default.png'}
                                 alt={group.name}
                                 className="product-card-img"
                                 loading="lazy"
@@ -371,18 +407,14 @@ const ProductList = () => {
                         <button className="add-btn">選擇規格</button>
                     </div>
                 )) : (
-                    <div className="no-result" style={{gridColumn: '1/-1', textAlign:'center', padding:'30px', color:'#888'}}>
+                    <div className="no-result" style={{ gridColumn: '1/-1', textAlign: 'center', padding: '30px', color: '#888' }}>
                         {activeBundle ? "此套組暫無商品" : "沒有商品"}
                     </div>
                 )}
             </div>
 
             {totalPages > 1 && (
-                <div className="pagination">
-                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>上一頁</button>
-                    <span>{currentPage} / {totalPages}</span>
-                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>下一頁</button>
-                </div>
+                <PaginationControl curr={currentPage} total={totalPages} setPage={setCurrentPage} />
             )}
 
             <div className="cart-wrapper" onClick={() => navigate('/shopcart')}>
@@ -394,7 +426,7 @@ const ProductList = () => {
                 <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
                         <div className="modal-img-wrapper">
-                            <img 
+                            <img
                                 src={selectedVariant.image ? `/images/${selectedVariant.image}` : '/images/default.png'}
                                 alt={selectedVariant.name}
                                 className="modal-product-img"
@@ -402,14 +434,14 @@ const ProductList = () => {
                             />
                         </div>
                         <h3 className="modal-title">{selectedGroup[0].name}</h3>
-                        
+
                         {/* ⭐ 雙層規格篩選：先口味 */}
                         {availableFlavors.length > 0 && (
-                            <div style={{marginBottom:'15px'}}>
-                                <p style={{fontWeight:'bold', marginBottom:'5px'}}>口味：</p>
-                                <div style={{display:'flex', flexWrap:'wrap'}}>
+                            <div style={{ marginBottom: '15px' }}>
+                                <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>口味：</p>
+                                <div style={{ display: 'flex', flexWrap: 'wrap' }}>
                                     {availableFlavors.map(flavor => (
-                                        <button 
+                                        <button
                                             key={flavor}
                                             className={`flavor-btn ${selectedFlavor === flavor ? 'active' : ''}`}
                                             onClick={() => setSelectedFlavor(flavor)}
@@ -423,7 +455,7 @@ const ProductList = () => {
 
                         {/* 後規格 */}
                         <div className="specs-section">
-                            <p style={{fontWeight:'bold', marginBottom:'5px'}}>規格：</p>
+                            <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>規格：</p>
                             <div className="specs-list">
                                 {displayedVariants.map(item => (
                                     <button key={item.id} className={`spec-btn ${selectedVariant.id === item.id ? 'active' : ''}`} onClick={() => setSelectedVariant(item)}>
