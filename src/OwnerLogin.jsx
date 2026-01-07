@@ -32,9 +32,25 @@ function Owner() {
     const [editingOrderDate, setEditingOrderDate] = useState('');
     const [orderSearchInput, setOrderSearchInput] = useState('');
     const [activeOrderSearch, setActiveOrderSearch] = useState('');
+
+    // ⭐ 獨立篩選狀態：待審 (Pending)
+    const [pendingSearchInput, setPendingSearchInput] = useState('');
+    const [activePendingSearch, setActivePendingSearch] = useState('');
+    const [pendingFilterType, setPendingFilterType] = useState('all');
+
+    // ⭐ 獨立篩選狀態：過期 (Expired)
+    const [expiredSearchInput, setExpiredSearchInput] = useState('');
+    const [activeExpiredSearch, setActiveExpiredSearch] = useState('');
+    const [expiredFilterType, setExpiredFilterType] = useState('all');
+
+    // ⭐ 獨立篩選狀態：已完成 (Completed)
     const [completedSearchInput, setCompletedSearchInput] = useState('');
     const [activeCompletedSearch, setActiveCompletedSearch] = useState('');
-    const [completedFilterType, setCompletedFilterType] = useState('all');
+    const [completedFilterType, setCompletedFilterType] = useState('all'); // 需求2：將用於按鈕切換
+
+    // ⭐ 圓餅圖互動狀態 (需求1)
+    const [pieLevel, setPieLevel] = useState('main'); // 'main' | 'sub'
+    const [selectedPieCategory, setSelectedPieCategory] = useState(null);
 
     // 分頁 State (不會因切換 Tab 重置)
     const [pendingPage, setPendingPage] = useState(1);
@@ -415,33 +431,25 @@ function Owner() {
         });
     };
 
+    // ⭐ Dashboard 計算邏輯 (含圓餅圖下鑽)
     const { stats, chartData } = useMemo(() => {
-        const now = moment();
         const rangeDate = moment().subtract(Number(dashboardRange), 'days');
-
         // 過濾有效訂單
-        const validOrders = orders.filter(o =>
-            o.status !== 'pending_review' &&
-            moment(o.rawTime).isAfter(rangeDate)
-        );
+        const validOrders = orders.filter(o => o.status !== 'pending_review' && moment(o.rawTime).isAfter(rangeDate));
 
-        let totalRevenue = 0;
-        let totalCost = 0;
+        let totalRevenue = 0, totalCost = 0;
         const dateMap = {};
         const productSalesMap = {};
-        const categoryMap = {}; // 分類圓餅圖用
-        let selfCount = 0, deliveryCount = 0; // 自取/送貨圓餅圖用
+        const categoryMap = {};
+        let selfCount = 0, deliveryCount = 0;
 
-        // 初始化日期 Map
+        // 初始化日期
         for (let i = Number(dashboardRange) - 1; i >= 0; i--) {
-            const d = moment().subtract(i, 'days').format('MM/DD');
-            dateMap[d] = { revenue: 0, cost: 0, profit: 0 };
+            dateMap[moment().subtract(i, 'days').format('MM/DD')] = { revenue: 0, cost: 0, profit: 0 };
         }
 
         validOrders.forEach(o => {
             const d = moment(o.rawTime).format('MM/DD');
-
-            // 計算自取/送貨
             if (o.pickupType === 'self') selfCount++; else deliveryCount++;
 
             if (dateMap[d]) {
@@ -450,72 +458,72 @@ function Owner() {
 
                 if (o.products) {
                     o.products.forEach(p => {
-                        // ⭐ 成本計算：優先用訂單內的 cost，沒有的話去 rawProducts 查 standard_cost
+                        // 成本計算：優先讀取訂單快照，無則回溯
                         let unitCost = Number(p.cost || 0);
                         if (unitCost === 0 && rawProducts.length > 0) {
-                            const found = rawProducts.find(r => r.id == p.id || r.name === p.name); // 寬鬆匹配
+                            const found = rawProducts.find(r => r.id == p.id || r.name === p.name);
                             if (found) unitCost = Number(found.standard_cost || 0);
                         }
                         orderCost += unitCost * Number(p.qty || 0);
 
-                        // ⭐ 分類統計
-                        let catName = '其他';
+                        // ⭐ 圓餅圖邏輯：根據 pieLevel 決定層級
                         const foundProd = rawProducts.find(r => r.id == p.id || r.name === p.name);
                         if (foundProd) {
-                            catName = categoryChartMode === 'main' ? (foundProd.main_category || '其他') : (foundProd.sub_category || '其他');
+                            const mainCat = foundProd.main_category || '其他';
+                            if (pieLevel === 'main') {
+                                // 主類別模式
+                                categoryMap[mainCat] = (categoryMap[mainCat] || 0) + Number(p.qty);
+                            } else {
+                                // 子類別模式：只統計選定主類別的商品
+                                if (mainCat === selectedPieCategory) {
+                                    const subCat = foundProd.sub_category || '其他';
+                                    categoryMap[subCat] = (categoryMap[subCat] || 0) + Number(p.qty);
+                                }
+                            }
                         }
-                        categoryMap[catName] = (categoryMap[catName] || 0) + Number(p.qty);
-
-                        // 熱銷商品
                         productSalesMap[p.name] = (productSalesMap[p.name] || 0) + Number(p.qty);
                     });
                 }
-
                 dateMap[d].revenue += revenue;
                 dateMap[d].cost += orderCost;
                 dateMap[d].profit += (revenue - orderCost);
-
                 totalRevenue += revenue;
                 totalCost += orderCost;
             }
         });
 
         // 轉換圖表資料
-        const lineChartData = Object.keys(dateMap).map(date => ({
-            date,
-            revenue: dateMap[date].revenue,
-            cost: dateMap[date].cost,
-            profit: dateMap[date].profit
-        }));
+        const lineChartData = Object.keys(dateMap).map(date => ({ date, ...dateMap[date] }));
+        const barChartData = Object.entries(productSalesMap).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
+        const categoryPieData = Object.entries(categoryMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+        const typePieData = [{ name: '自取', value: selfCount }, { name: '送貨', value: deliveryCount }].filter(d => d.value > 0);
 
-        const barChartData = Object.entries(productSalesMap)
-            .map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
-
-        const categoryPieData = Object.entries(categoryMap)
-            .map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-
-        const typePieData = [
-            { name: '自取', value: selfCount },
-            { name: '送貨', value: deliveryCount }
-        ].filter(d => d.value > 0);
-
-        // 頂部卡片數據
+        // 卡片統計
         const todayStr = moment().format('YYYY-MM-DD');
-        const currentMonth = moment().format('YYYY-MM');
-        let pendingCount = 0, todayCompleted = 0, monthCompleted = 0;
+        let pendingCount = 0, todayCompleted = 0;
         orders.forEach(o => {
             if (o.status === 'pending_review') pendingCount++;
-            if (o.status === 'completed') {
-                if (moment(o.rawTime).format('YYYY-MM-DD') === todayStr) todayCompleted++;
-                if (moment(o.rawTime).format('YYYY-MM') === currentMonth) monthCompleted++;
-            }
+            if (o.status === 'completed' && moment(o.rawTime).format('YYYY-MM-DD') === todayStr) todayCompleted++;
         });
 
         return {
-            stats: { pendingCount, todayCompleted, monthCompleted, totalRevenue, totalProfit: totalRevenue - totalCost },
+            stats: { pendingCount, todayCompleted, totalRevenue, totalProfit: totalRevenue - totalCost },
             chartData: { lineChartData, barChartData, categoryPieData, typePieData }
         };
-    }, [orders, rawProducts, dashboardRange, categoryChartMode]);
+    }, [orders, rawProducts, dashboardRange, pieLevel, selectedPieCategory]); // 依賴項包含 pieLevel
+
+    // ⭐ 圓餅圖點擊：進入子類別
+    const handlePieClick = (data) => {
+        if (pieLevel === 'main') {
+            setSelectedPieCategory(data.name);
+            setPieLevel('sub');
+        }
+    };
+    // 返回主類別
+    const resetPieChart = () => {
+        setPieLevel('main');
+        setSelectedPieCategory(null);
+    };
 
     // --- 商品管理邏輯 ---
     const handleProductSearch = () => {
@@ -586,35 +594,35 @@ function Owner() {
     const saveProductChanges = async () => {
         if (!editingVariant) return;
         try {
-            if (editingVariant.id) {
-                // --- 舊商品：執行更新 (PUT) ---
-                await api.put(`/products/${editingVariant.id}`, editingVariant);
+            // ⭐ 修正：強制轉為數字並確保欄位存在
+            const payload = {
+                ...editingVariant,
+                profit: Number(editingVariant.profit || 0),
+                standard_cost: Number(editingVariant.standard_cost || 0),
+                price_A: Number(editingVariant.price_A || 0)
+            };
 
-                // 同步更新邏輯 (保持不變)
+            if (editingVariant.id) {
+                // 修改
+                await api.put(`/products/${editingVariant.id}`, payload);
+
+                // 同步更新邏輯
                 if (syncCommonFields) {
                     const commonFields = {
-                        name: editingVariant.name,
-                        brand: editingVariant.brand,
-                        image: editingVariant.image,
-                        main_category: editingVariant.main_category,
-                        sub_category: editingVariant.sub_category,
-                        saler: editingVariant.saler,
-                        alias: editingVariant.alias
+                        name: editingVariant.name, brand: editingVariant.brand, image: editingVariant.image,
+                        main_category: editingVariant.main_category, sub_category: editingVariant.sub_category,
+                        saler: editingVariant.saler, alias: editingVariant.alias
                     };
                     const otherIds = editingGroup.filter(i => i.id && i.id !== editingVariant.id).map(i => i.id);
                     const promises = otherIds.map(id => api.put(`/products/${id}`, { ...editingGroup.find(i => i.id === id), ...commonFields }));
                     await Promise.all(promises);
-                    alert("修改成功 (含同步更新)");
-                } else {
-                    alert("修改成功");
                 }
+                alert("修改成功");
             } else {
-                // --- 新商品：執行新增 (POST) ---
-                await api.post("/products", editingVariant);
+                // 新增
+                await api.post("/products", payload);
                 alert("新增成功");
             }
-
-            // 重新抓取資料並關閉視窗
             fetchData();
             setIsEditModalOpen(false);
         } catch (e) {
@@ -1137,12 +1145,29 @@ function Owner() {
                             </div>
 
                             {/* 3. 類別佔比 */}
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}><h3>類別佔比</h3><select value={categoryChartMode} onChange={e => setCategoryChartMode(e.target.value)}><option value="main">主分類</option><option value="sub">子分類</option></select></div>
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px', position: 'relative' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <h3>類別佔比 {pieLevel === 'sub' ? `(${selectedPieCategory})` : ''}</h3>
+                                    {pieLevel === 'sub' && (
+                                        <button onClick={resetPieChart} style={{ padding: '4px 10px', fontSize: '0.9rem', cursor: 'pointer', borderRadius: '5px', border: '1px solid #ccc', background: '#f0f0f0' }}>
+                                            ⬅ 返回主類別
+                                        </button>
+                                    )}
+                                </div>
                                 <div style={{ width: '100%', height: 300 }}>
                                     <ResponsiveContainer>
                                         <PieChart>
-                                            <Pie data={chartData.categoryPieData} cx="50%" cy="50%" outerRadius={80} fill="#8884d8" dataKey="value" nameKey="name" label>{chartData.categoryPieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /><Legend />
+                                            <Pie
+                                                data={chartData.categoryPieData}
+                                                cx="50%" cy="50%" outerRadius={80}
+                                                fill="#8884d8" dataKey="value" nameKey="name" label
+                                                onClick={handlePieClick} // 點擊事件
+                                                style={{ cursor: pieLevel === 'main' ? 'pointer' : 'default' }}
+                                            >
+                                                {chartData.categoryPieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                                            </Pie>
+                                            <Tooltip formatter={(value) => `${value} 個`} />
+                                            <Legend />
                                         </PieChart>
                                     </ResponsiveContainer>
                                 </div>
@@ -1162,92 +1187,146 @@ function Owner() {
                         </div>
                     </div>
                 )}
-
                 {activeTab === "orders" && (
                     <div className="orders-view">
-                        <header className="content-header"><h2>訂單管理</h2></header>
 
-                        {/* 待審訂單區塊 (Pending Review) */}
-                        <div className="pending-section" style={{ marginBottom: '40px', background: '#fff3e0', padding: '20px', borderRadius: '10px', border: '1px solid #ffe0b2' }}>
-                            <h3 style={{ color: '#e65100', marginBottom: '15px' }}>🔔 待審訂單 ({pendingReviewOrders.length})</h3>
-                            {pendingReviewOrders.length === 0 ? <p style={{ color: '#888' }}>目前沒有新進訂單。</p> : (
-                                <table className="admin-table" style={{ background: 'white' }}>
-                                    <thead><tr><th>下單時間</th><th>取貨日期</th><th>店家名稱</th><th>操作</th><th>狀態</th><th>明細</th></tr></thead>
-                                    <tbody>
-                                        {pendingReviewOrders.map(o => renderOrderRow(o, false, true))}
-                                    </tbody>
-                                </table>
+                        {/* 1. 待審區塊 (移至最上方) */}
+                        <div className="pending-section" style={{ marginBottom: '30px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                                <h3>🔔 待審訂單</h3>
+                                <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                                    <button className={`filter-btn ${pendingFilterType === 'all' ? 'active-filter' : ''}`} onClick={() => setPendingFilterType('all')}>全部</button>
+                                    <button className={`filter-btn ${pendingFilterType === 'self' ? 'active-filter' : ''}`} onClick={() => setPendingFilterType('self')}>自取</button>
+                                    <button className={`filter-btn ${pendingFilterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setPendingFilterType('delivery')}>送貨</button>
+                                    <input
+                                        placeholder="搜尋待審..."
+                                        value={pendingSearchInput}
+                                        onChange={e => setPendingSearchInput(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && setActivePendingSearch(pendingSearchInput)}
+                                        style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', marginLeft: '10px' }}
+                                    />
+                                    <button className="btn-detail" onClick={() => setActivePendingSearch(pendingSearchInput)}>🔍</button>
+                                </div>
+                            </div>
+
+                            {pendingData.length > 0 ? (
+                                <>
+                                    <table className="admin-table"><tbody>{pagedPending.data.map(o => renderOrderRow(o, false, true))}</tbody></table>
+                                    <PaginationControl curr={pendingPage} total={pagedPending.totalPages} setPage={setPendingPage} />
+                                </>
+                            ) : (
+                                <div style={{ padding: '30px', textAlign: 'center', color: '#888', background: '#f9f9f9', borderRadius: '8px', marginTop: '10px' }}>
+                                    目前沒有待審訂單
+                                </div>
                             )}
-                            <PaginationControl curr={pendingPage} total={pagedPending.totalPages} setPage={setPendingPage} />
                         </div>
 
-                        {/* 過期訂單區塊 (Expired) */}
-                        {expiredData.length > 0 && (
-                            <div className="expired-section">
-                                <h3>⚠️ 過期未完成訂單</h3>
-                                <table className="admin-table"><tbody>{pagedExpired.data.map(o => renderOrderRow(o))}</tbody></table>
-                                <PaginationControl curr={expiredPage} total={pagedExpired.totalPages} setPage={setExpiredPage} />
+                        {/* 2. 過期區塊 (移至待審之下、主要標籤之上) */}
+                        <div className="expired-section" style={{ marginBottom: '30px', borderTop: '2px solid #e53935', paddingTop: '10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                                <h3 style={{ color: '#c62828' }}>⚠️ 過期未完成</h3>
+                                <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                                    <button className={`filter-btn ${expiredFilterType === 'all' ? 'active-filter' : ''}`} onClick={() => setExpiredFilterType('all')}>全部</button>
+                                    <button className={`filter-btn ${expiredFilterType === 'self' ? 'active-filter' : ''}`} onClick={() => setExpiredFilterType('self')}>自取</button>
+                                    <button className={`filter-btn ${expiredFilterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setExpiredFilterType('delivery')}>送貨</button>
+                                    <input
+                                        placeholder="搜尋過期..."
+                                        value={expiredSearchInput}
+                                        onChange={e => setExpiredSearchInput(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && setActiveExpiredSearch(expiredSearchInput)}
+                                        style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', marginLeft: '10px' }}
+                                    />
+                                    <button className="btn-detail" onClick={() => setActiveExpiredSearch(expiredSearchInput)}>🔍</button>
+                                </div>
                             </div>
-                        )}
 
-                        {/* 正式列表 (Active) */}
+                            {expiredData.length > 0 ? (
+                                <>
+                                    <table className="admin-table"><tbody>{pagedExpired.data.map(o => renderOrderRow(o))}</tbody></table>
+                                    <PaginationControl curr={expiredPage} total={pagedExpired.totalPages} setPage={setExpiredPage} />
+                                </>
+                            ) : (
+                                <div style={{ padding: '20px', textAlign: 'center', color: '#c62828', background: '#ffebee', borderRadius: '8px', marginTop: '10px' }}>
+                                    目前沒有過期訂單
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 3. ⭐ 切換標籤 (移到這裡) */}
                         <div className="tabs" style={{ marginBottom: '10px' }}>
                             <button className={orderSubTab === 'today' ? 'active' : ''} onClick={() => setOrderSubTab('today')}>今日出單</button>
                             <button className={orderSubTab === 'future' ? 'active' : ''} onClick={() => setOrderSubTab('future')}>非今日出單</button>
                             <button className={orderSubTab === 'all' ? 'active' : ''} onClick={() => setOrderSubTab('all')}>訂單總覽</button>
                         </div>
-                        <div className="sub-tabs" style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>
-                            <button className={`filter-btn ${filterType === 'all' ? 'active-filter' : ''}`} onClick={() => setFilterType('all')}>全部類型</button>
-                            <button className={`filter-btn ${filterType === 'self' ? 'active-filter' : ''}`} onClick={() => setFilterType('self')}>🏠 自取</button>
-                            <button className={`filter-btn ${filterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setFilterType('delivery')}>🚚 送貨</button>
 
-                            <div style={{ marginLeft: 'auto', display: 'flex', gap: '5px' }}>
-                                <input
-                                    placeholder="搜尋姓名或日期(20250101)..."
-                                    value={orderSearchInput}
-                                    onChange={e => setOrderSearchInput(e.target.value)}
-                                    style={{ padding: '8px', borderRadius: '20px', border: '1px solid #ccc', width: '250px' }}
-                                />
-                                <button className="btn-detail" onClick={handleOrderSearch}>搜尋</button>
-                            </div>
-                        </div>
+                        {/* 4. 主列表 (進行中) - 對應上方的標籤 */}
                         <div className="table-container">
-                            <h4>📋 訂單列表</h4>
-                            <table className="admin-table"><tbody>
-                                {pagedMain.data.length > 0 ? pagedMain.data.map(o => renderOrderRow(o, o.status === 'completed')) : <tr><td colSpan="6">無訂單</td></tr>}
-                            </tbody></table>
-                            <PaginationControl curr={ordersPage} total={pagedMain.totalPages} setPage={setOrdersPage} />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                                <h4>
+                                    {orderSubTab === 'today' ? '📋 今日需出貨' : (orderSubTab === 'future' ? '📅 未來預定' : '🗂 所有進行中')}
+                                </h4>
+                                <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                                    <button className={`filter-btn ${filterType === 'all' ? 'active-filter' : ''}`} onClick={() => setFilterType('all')}>全部</button>
+                                    <button className={`filter-btn ${filterType === 'self' ? 'active-filter' : ''}`} onClick={() => setFilterType('self')}>自取</button>
+                                    <button className={`filter-btn ${filterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setFilterType('delivery')}>送貨</button>
+                                    <input
+                                        placeholder="搜尋姓名/電話..."
+                                        value={orderSearchInput}
+                                        onChange={e => setOrderSearchInput(e.target.value)}
+                                        onKeyDown={e => e.key === 'Enter' && setActiveOrderSearch(orderSearchInput)}
+                                        style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', marginLeft: '10px' }}
+                                    />
+                                    <button className="btn-detail" onClick={() => setActiveOrderSearch(orderSearchInput)}>🔍</button>
+                                </div>
+                            </div>
+
+                            {pagedMain.data.length > 0 ? (
+                                <>
+                                    <table className="admin-table"><tbody>{pagedMain.data.map(o => renderOrderRow(o))}</tbody></table>
+                                    <PaginationControl curr={ordersPage} total={pagedMain.totalPages} setPage={setOrdersPage} />
+                                </>
+                            ) : (
+                                <div style={{ padding: '30px', textAlign: 'center', color: '#888', background: '#f9f9f9', borderRadius: '8px' }}>
+                                    {orderSubTab === 'today' ? '今日無待出貨訂單' : '此分類下無訂單'}
+                                </div>
+                            )}
                         </div>
 
+                        {/* 5. 已完成區塊 (只在總覽顯示，位於最下方) */}
                         {orderSubTab === 'all' && (
                             <div className="table-container" style={{ marginTop: '30px', borderTop: '4px solid #4caf50' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
                                     <h4 style={{ color: '#2e7d32', margin: 0 }}>✅ 已完成訂單</h4>
-                                    <div style={{ display: 'flex', gap: '10px' }}>
-                                        <select value={completedFilterType} onChange={e => setCompletedFilterType(e.target.value)} style={{ padding: '5px' }}>
-                                            <option value="all">全部</option>
-                                            <option value="self">自取</option>
-                                            <option value="delivery">送貨</option>
-                                        </select>
+                                    <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                                        <button className={`filter-btn ${completedFilterType === 'all' ? 'active-filter' : ''}`} onClick={() => setCompletedFilterType('all')}>全部</button>
+                                        <button className={`filter-btn ${completedFilterType === 'self' ? 'active-filter' : ''}`} onClick={() => setCompletedFilterType('self')}>自取</button>
+                                        <button className={`filter-btn ${completedFilterType === 'delivery' ? 'active-filter' : ''}`} onClick={() => setCompletedFilterType('delivery')}>送貨</button>
+
                                         <input
                                             placeholder="搜尋已完成..."
                                             value={completedSearchInput}
                                             onChange={e => setCompletedSearchInput(e.target.value)}
                                             onKeyDown={e => e.key === 'Enter' && setActiveCompletedSearch(completedSearchInput)}
-                                            style={{ padding: '5px' }}
+                                            style={{ padding: '5px', borderRadius: '5px', border: '1px solid #ccc', marginLeft: '10px' }}
                                         />
-                                        <button onClick={() => setActiveCompletedSearch(completedSearchInput)} className="btn-detail">搜尋</button>
+                                        <button className="btn-detail" onClick={() => setActiveCompletedSearch(completedSearchInput)}>🔍</button>
                                     </div>
                                 </div>
-                                <table className="admin-table"><tbody>
-                                    {pagedCompleted.data.map(o => renderOrderRow(o, true))}
-                                </tbody></table>
-                                <PaginationControl curr={completedPage} total={pagedCompleted.totalPages} setPage={setCompletedPage} />
+
+                                {completedData.length > 0 ? (
+                                    <>
+                                        <table className="admin-table"><tbody>{pagedCompleted.data.map(o => renderOrderRow(o, true))}</tbody></table>
+                                        <PaginationControl curr={completedPage} total={pagedCompleted.totalPages} setPage={setCompletedPage} />
+                                    </>
+                                ) : (
+                                    <div style={{ padding: '30px', textAlign: 'center', color: '#2e7d32', background: '#e8f5e9', borderRadius: '8px' }}>
+                                        目前沒有已完成訂單
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
-                )
-                }
+                )}
 
                 {
                     activeTab === "products" && (
@@ -1710,16 +1789,17 @@ function Owner() {
                                     <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>單位</label><input value={editingVariant.unit || ''} onChange={e => setEditingVariant({ ...editingVariant, unit: e.target.value })} /></div>
 
                                     {/* 價格與利潤區塊 */}
-                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
-                                        <label>進貨成本 (Standard Cost)</label>
-                                        <input type="number" value={editingVariant.standard_cost || 0} onChange={e => handleCostChange(e.target.value)} />
-                                    </div>
+
                                     <div className="input-group">
                                         <label>建議售價 (Rec. Price)</label>
                                         <input type="number" value={editingVariant.rec_price || 0} onChange={e => setEditingVariant({ ...editingVariant, rec_price: e.target.value })} />
                                     </div>
                                     <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>售價 A (Price A)</label><input type="number" value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} /></div>
                                     <div className="input-group"><label>售價 B (Price B)</label><input type="number" value={editingVariant.price_B || 0} onChange={e => setEditingVariant({ ...editingVariant, price_B: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
+                                        <label>進貨成本 (Standard Cost)</label>
+                                        <input type="number" value={editingVariant.standard_cost || 0} onChange={e => handleCostChange(e.target.value)} />
+                                    </div>
                                     <div className="input-group" style={{ background: '#e8f5e9', padding: '10px', borderRadius: '8px' }}>
                                         <label>固定利潤 (Profit)</label>
                                         <input type="number" value={editingVariant.profit || 0} onChange={e => handleProfitChange(e.target.value)} />

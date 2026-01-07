@@ -217,7 +217,7 @@ app.put("/products/:id", async (req, res) => {
         rec_price, standard_cost, profit, saler, alias, main_category, sub_category
     } = req.body;
     try {
-        // 修正：加入 profit 欄位
+        // 確保 profit 有被放入 SQL
         await pool.query(`UPDATE products SET 
                 name=$1, "price_A"=$2, "price_B"=$3, spec=$4, unit=$5, brand=$6, image=$7,
                 flavor=$8, rec_price=$9, standard_cost=$10, profit=$11, saler=$12, alias=$13, main_category=$14, sub_category=$15
@@ -670,12 +670,10 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         const dbUser = userRes.rows[0];
         const finalDeliveryType = deliveryType || dbUser.delivery_type;
         const finalAddress = address || dbUser.address;
-        let finalPickupDate = pickupDate || dbUser.pickup_date;
-        if (!finalPickupDate) finalPickupDate = null;
-        let finalPickupTime = pickupTime || dbUser.pickup_time;
-        if (!finalPickupTime) finalPickupTime = null;
+        const finalPickupDate = pickupDate || dbUser.pickup_date || null;
+        const finalPickupTime = pickupTime || dbUser.pickup_time || null;
 
-        // ⭐ 這裡多抓 standard_cost
+        // 查詢時抓取當下的 standard_cost
         const cartRes = await pool.query(`SELECT c.*, p.name, p."price_A", p."price_B", p.image, p.flavor, p.standard_cost FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1`, [req.user.uuid]);
 
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "Empty" });
@@ -683,13 +681,16 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         const isB = dbUser.price_tier === 'B';
         const total = cartRes.rows.reduce((sum, item) => sum + (Number(isB ? item.price_B : item.price_A) * item.quantity), 0);
 
+        // ⭐ 關鍵：建立訂單快照 (Snapshot)
+        // 這裡將當下的 price (售價) 與 standard_cost (成本) 寫死進 JSON
+        // 即使之後修改商品價格，這筆歷史訂單的利潤計算也不會變
         const itemsJson = cartRes.rows.map(item => ({
             id: item.product_id,
             name: item.name,
             qty: item.quantity,
             note: item.note,
             price: isB ? item.price_B : item.price_A,
-            cost: item.standard_cost || 0, // ⭐ 紀錄成本到訂單 JSON
+            cost: item.standard_cost || 0, // 鎖定成本
             image: item.image,
             flavor: item.flavor
         }));
