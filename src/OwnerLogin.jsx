@@ -1099,13 +1099,16 @@ function Owner() {
                                 <option value="90">近 90 天</option>
                             </select>
                         </header>
+                        {/* 統計卡片 */}
                         <div className="stat-grid">
                             <div className="stat-card"><span>💰 區間營收</span><strong>${stats.totalRevenue.toLocaleString()}</strong></div>
                             <div className="stat-card"><span>📈 區間淨利</span><strong style={{ color: '#2196f3' }}>${stats.totalProfit.toLocaleString()}</strong></div>
+                            <div className="stat-card"><span>🚨 待處理</span><strong style={{ color: '#e53935' }}>{stats.pendingCount}</strong></div>
+                            <div className="stat-card"><span>✅ 本日完成</span><strong style={{ color: '#43a047' }}>{stats.todayCompleted}</strong></div>
                         </div>
 
                         <div className="charts-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginTop: '30px' }}>
-                            {/* 財務趨勢圖 */}
+                            {/* 1. 財務趨勢 */}
                             <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
                                 <h3>財務趨勢</h3>
                                 <div style={{ width: '100%', height: 300 }}>
@@ -1120,37 +1123,38 @@ function Owner() {
                                 </div>
                             </div>
 
-                            {/* 分類圓餅圖 */}
+                            {/* 2. 熱銷商品 (補回) */}
                             <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <h3>類別佔比</h3>
-                                    <select value={categoryChartMode} onChange={e => setCategoryChartMode(e.target.value)}>
-                                        <option value="main">主分類</option>
-                                        <option value="sub">子分類</option>
-                                    </select>
+                                <h3>熱銷商品 Top 5</h3>
+                                <div style={{ width: '100%', height: 300 }}>
+                                    <ResponsiveContainer>
+                                        <BarChart data={chartData.barChartData} layout="vertical">
+                                            <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" /><YAxis dataKey="name" type="category" width={100} /><Tooltip />
+                                            <Bar dataKey="qty" fill="#82ca9d" name="銷量" />
+                                        </BarChart>
+                                    </ResponsiveContainer>
                                 </div>
+                            </div>
+
+                            {/* 3. 類別佔比 */}
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}><h3>類別佔比</h3><select value={categoryChartMode} onChange={e => setCategoryChartMode(e.target.value)}><option value="main">主分類</option><option value="sub">子分類</option></select></div>
                                 <div style={{ width: '100%', height: 300 }}>
                                     <ResponsiveContainer>
                                         <PieChart>
-                                            <Pie data={chartData.categoryPieData} cx="50%" cy="50%" outerRadius={80} fill="#8884d8" dataKey="value" nameKey="name" label>
-                                                {chartData.categoryPieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
-                                            </Pie>
-                                            <Tooltip /><Legend />
+                                            <Pie data={chartData.categoryPieData} cx="50%" cy="50%" outerRadius={80} fill="#8884d8" dataKey="value" nameKey="name" label>{chartData.categoryPieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}</Pie><Tooltip /><Legend />
                                         </PieChart>
                                     </ResponsiveContainer>
                                 </div>
                             </div>
 
-                            {/* 訂單類型圓餅圖 (補回) */}
+                            {/* 4. 訂單類型 (補回) */}
                             <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
                                 <h3>訂單類型</h3>
                                 <div style={{ width: '100%', height: 300 }}>
                                     <ResponsiveContainer>
                                         <PieChart>
-                                            <Pie data={chartData.typePieData} cx="50%" cy="50%" outerRadius={80} fill="#82ca9d" dataKey="value" nameKey="name" label>
-                                                <Cell fill="#0088FE" /><Cell fill="#FFBB28" />
-                                            </Pie>
-                                            <Tooltip /><Legend />
+                                            <Pie data={chartData.typePieData} cx="50%" cy="50%" outerRadius={80} fill="#82ca9d" dataKey="value" nameKey="name" label><Cell fill="#0088FE" /><Cell fill="#FFBB28" /></Pie><Tooltip /><Legend />
                                         </PieChart>
                                     </ResponsiveContainer>
                                 </div>
@@ -1288,10 +1292,10 @@ function Owner() {
                                     <option value="全部">所有子分類</option>
                                     {selectedParent !== '全部' && categoriesMap[selectedParent]?.map(sub => (<option key={sub} value={sub}>{sub}</option>))}
                                 </select>
-                                <input list="brand-list" placeholder="品牌" value={selectedBrand === '全部' ? '' : selectedBrand} onChange={e => setSelectedBrand(e.target.value || '全部')} className="filter-input" />
+                                <input list="brand-list" placeholder="品牌" value={selectedBrand === '全部' ? '' : selectedBrand} onChange={e => setSelectedBrand(e.target.value || '全部')} className="filter-input" style={{ marginRight: '10px', padding: '8px', border: '1px solid #ccc', borderRadius: '5px' }} />
                                 <datalist id="brand-list"><option value="全部" />{brands.map(b => <option key={b} value={b} />)}</datalist>
 
-                                <input list="saler-list" placeholder="進貨人" value={selectedSaler === '全部' ? '' : selectedSaler} onChange={e => setSelectedSaler(e.target.value || '全部')} className="filter-input" />
+                                <input list="saler-list" placeholder="進貨人" value={selectedSaler === '全部' ? '' : selectedSaler} onChange={e => setSelectedSaler(e.target.value || '全部')} className="filter-input" style={{ marginRight: '10px', padding: '8px', border: '1px solid #ccc', borderRadius: '5px' }} />
                                 <datalist id="saler-list"><option value="全部" />{uniqueSalers.map(s => <option key={s} value={s} />)}</datalist>
 
                                 <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>

@@ -217,7 +217,7 @@ app.put("/products/:id", async (req, res) => {
         rec_price, standard_cost, profit, saler, alias, main_category, sub_category
     } = req.body;
     try {
-        // 確保 profit 有被放入
+        // 修正：加入 profit 欄位
         await pool.query(`UPDATE products SET 
                 name=$1, "price_A"=$2, "price_B"=$3, spec=$4, unit=$5, brand=$6, image=$7,
                 flavor=$8, rec_price=$9, standard_cost=$10, profit=$11, saler=$12, alias=$13, main_category=$14, sub_category=$15
