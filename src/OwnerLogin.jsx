@@ -470,6 +470,7 @@ function Owner() {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
             if (selectedBrand !== '全部' && item.brand !== selectedBrand) return false;
+            // ⭐ 確保這裡有加入進貨人篩選
             if (selectedSaler !== '全部' && item.saler !== selectedSaler) return false;
             return true;
         });
@@ -489,7 +490,7 @@ function Owner() {
         else if (sortBy === 'popularity_desc') result.sort((a, b) => (b.items[0].popularity || 0) - (a.items[0].popularity || 0));
 
         return result;
-    }, [rawProducts, activeSearch, selectedParent, selectedChild, selectedBrand, sortBy]);
+    }, [rawProducts, activeSearch, selectedParent, selectedChild, selectedBrand, selectedSaler, sortBy]);
 
     const totalProdPages = Math.ceil(processedProductGroups.length / prodPageSize);
     const currentProdData = processedProductGroups.slice((prodPage - 1) * prodPageSize, prodPage * prodPageSize);
@@ -655,7 +656,7 @@ function Owner() {
     };
 
     // --- 渲染元件 ---
- const renderOrderRow = (o, isCompleted = false, isPendingReview = false) => {
+    const renderOrderRow = (o, isCompleted = false, isPendingReview = false) => {
         const isEditing = editingOrder && editingOrder.id === o.id;
         // 如果正在編輯，顯示編輯中的資料，否則顯示原始資料
         const displayOrder = isEditing ? editingOrder : o;
@@ -669,21 +670,21 @@ function Owner() {
                     borderLeft: isEditing ? '4px solid #2196f3' : 'none' // 編輯中提示
                 }}>
                     <td>{o.時間}</td>
-                    
+
                     {/* ⭐ 可編輯的日期與方式 */}
                     <td>
                         {isEditing ? (
-                            <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
-                                <input 
-                                    type="date" 
-                                    value={displayOrder.pickupDate} 
-                                    onChange={e => setEditingOrder({...editingOrder, pickupDate: e.target.value})}
-                                    style={{padding:'4px'}}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                <input
+                                    type="date"
+                                    value={displayOrder.pickupDate}
+                                    onChange={e => setEditingOrder({ ...editingOrder, pickupDate: e.target.value })}
+                                    style={{ padding: '4px' }}
                                 />
-                                <select 
-                                    value={displayOrder.pickupType} 
-                                    onChange={e => setEditingOrder({...editingOrder, pickupType: e.target.value})}
-                                    style={{padding:'4px'}}
+                                <select
+                                    value={displayOrder.pickupType}
+                                    onChange={e => setEditingOrder({ ...editingOrder, pickupType: e.target.value })}
+                                    style={{ padding: '4px' }}
                                 >
                                     <option value="self">自取</option>
                                     <option value="delivery">送貨</option>
@@ -720,12 +721,12 @@ function Owner() {
                     {/* ⭐ 可編輯的列印狀態 */}
                     <td>
                         {isEditing ? (
-                            <label style={{cursor:'pointer', display:'flex', alignItems:'center'}}>
-                                <input 
-                                    type="checkbox" 
-                                    checked={displayOrder.isPrinted} 
-                                    onChange={e => setEditingOrder({...editingOrder, isPrinted: e.target.checked})}
-                                    style={{marginRight:'5px'}}
+                            <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={displayOrder.isPrinted}
+                                    onChange={e => setEditingOrder({ ...editingOrder, isPrinted: e.target.checked })}
+                                    style={{ marginRight: '5px' }}
                                 />
                                 已列印
                             </label>
@@ -739,10 +740,10 @@ function Owner() {
                         {!isPendingReview && !isEditing && (
                             <button className="btn-detail" onClick={() => printOrder(o.id)} title="列印工單">🖨</button>
                         )}
-                        
+
                         {/* 展開/收合明細 */}
                         <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
-                        
+
                         {/* 完成按鈕 (非編輯狀態才顯示) */}
                         {!isCompleted && !isPendingReview && !isEditing && (
                             <button className="btn-detail" style={{ background: '#43a047', color: 'white' }} onClick={() => completeOrder(o.id)}>完成</button>
@@ -751,12 +752,12 @@ function Owner() {
                         {/* ⭐ 新增：編輯/儲存 按鈕切換 */}
                         {!isPendingReview && !isCompleted && (
                             isEditing ? (
-                                <div style={{marginTop:'5px', display:'flex', gap:'5px'}}>
-                                    <button className="btn-detail" style={{background:'#2196f3', color:'white'}} onClick={saveOrderEdit}>儲存</button>
-                                    <button className="btn-detail" style={{background:'#757575', color:'white'}} onClick={() => setEditingOrder(null)}>取消</button>
+                                <div style={{ marginTop: '5px', display: 'flex', gap: '5px' }}>
+                                    <button className="btn-detail" style={{ background: '#2196f3', color: 'white' }} onClick={saveOrderEdit}>儲存</button>
+                                    <button className="btn-detail" style={{ background: '#757575', color: 'white' }} onClick={() => setEditingOrder(null)}>取消</button>
                                 </div>
                             ) : (
-                                <button className="btn-detail" style={{ marginLeft:'5px', background: '#ffa000', color: 'white' }} onClick={() => startEditOrder(o)}>編輯</button>
+                                <button className="btn-detail" style={{ marginLeft: '5px', background: '#ffa000', color: 'white' }} onClick={() => startEditOrder(o)}>編輯</button>
                             )
                         )}
                     </td>
@@ -813,7 +814,7 @@ function Owner() {
             </>
         );
     };
-    
+
     if (!isLoggedIn) {
         return (
             <div className="admin-login-wrapper">
