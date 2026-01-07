@@ -13,7 +13,7 @@ import {
     fileURLToPath
 } from 'url';
 
-import multer from 'multer'; 
+import multer from 'multer';
 import fs from 'fs';
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
@@ -695,23 +695,38 @@ app.put("/api/orders/:id", async (req, res) => {
         items,
         total,
         order_note,
-        pickup_date
+        pickup_date,  // 新增接收
+        pickup_type,  // 新增接收
+        is_printed    // 新增接收
     } = req.body;
+
     try {
-        if (pickup_date) {
-            await pool.query("UPDATE orders SET items=$1, total_amount=$2, order_note=$3, pickup_date=$4 WHERE order_id=$5", [JSON.stringify(items), total, order_note, pickup_date, req.params.id]);
-        } else {
-            await pool.query("UPDATE orders SET items=$1, total_amount=$2, order_note=$3 WHERE order_id=$4", [JSON.stringify(items), total, order_note, req.params.id]);
-        }
-        res.json({
-            message: "訂單已更新"
-        });
+        await pool.query(
+            `UPDATE orders SET 
+                items=$1, 
+                total_amount=$2, 
+                order_note=$3, 
+                pickup_date=$4, 
+                pickup_type=$5, 
+                is_printed=$6 
+             WHERE order_id=$7`,
+            [
+                JSON.stringify(items),
+                total,
+                order_note,
+                pickup_date,
+                pickup_type,
+                is_printed,
+                req.params.id
+            ]
+        );
+        res.json({ message: "訂單已更新" });
     } catch (err) {
-        res.status(500).json({
-            message: "更新失敗"
-        });
+        console.error(err);
+        res.status(500).json({ message: "更新失敗" });
     }
 });
+
 app.put("/api/orders/:id/confirm", async (req, res) => {
     const {
         pickupDate

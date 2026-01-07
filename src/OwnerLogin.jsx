@@ -39,6 +39,7 @@ function Owner() {
     const [selectedParent, setSelectedParent] = useState('全部');
     const [selectedChild, setSelectedChild] = useState('全部');
     const [selectedBrand, setSelectedBrand] = useState('全部');
+    const [selectedSaler, setSelectedSaler] = useState('全部');
     const [sortBy, setSortBy] = useState('default');
     const [prodPage, setProdPage] = useState(1);
     const prodPageSize = 17;
@@ -131,6 +132,11 @@ function Owner() {
         try { await api.post('/logout'); setIsLoggedIn(false); } catch (e) { }
     };
 
+    // --- 計算唯一供應商列表 ---
+    const uniqueSalers = useMemo(() => {
+        return [...new Set(rawProducts.map(p => p.saler).filter(Boolean))];
+    }, [rawProducts]);
+
     // --- 訂單篩選 ---
     const todayStr = moment().format('YYYY-MM-DD');
     const expiredOrders = useMemo(() => {
@@ -211,7 +217,12 @@ function Owner() {
     };
 
     const startEditOrder = (order) => {
-        setEditingOrder(JSON.parse(JSON.stringify(order)));
+        setEditingOrder({
+            ...JSON.parse(JSON.stringify(order)),
+            pickupDate: order.pickupDate || '',
+            pickupType: order.pickupType || 'self',
+            isPrinted: order.isPrinted || false
+        });
     };
 
     const saveOrderEdit = async () => {
@@ -224,13 +235,19 @@ function Owner() {
             await api.put(`/api/orders/${editingOrder.id}`, {
                 items: editingOrder.products,
                 total: newTotal,
-                order_note: editingOrder.order_note
+                order_note: editingOrder.order_note,
+                pickup_date: editingOrder.pickupDate, // ⭐ 更新日期
+                pickup_type: editingOrder.pickupType, // ⭐ 更新方式
+                is_printed: editingOrder.isPrinted      // ⭐ 更新列印狀態
             });
 
             setOrders(prev => prev.map(o => o.id === editingOrder.id ? { ...editingOrder, total: newTotal } : o));
             setEditingOrder(null);
             alert("修改成功");
-        } catch (e) { alert("修改失敗"); }
+        } catch (e) {
+            console.error(e);
+            alert("修改失敗");
+        }
     };
 
     const handleEditItemQty = (index, delta) => {
@@ -432,6 +449,7 @@ function Owner() {
         setSelectedParent('全部');
         setSelectedChild('全部');
         setSelectedBrand('全部');
+        setSelectedSaler('全部');
         setProdPage(1);
     };
 
@@ -452,6 +470,7 @@ function Owner() {
             if (selectedParent !== '全部' && item.main_category !== selectedParent) return false;
             if (selectedChild !== '全部' && item.sub_category !== selectedChild) return false;
             if (selectedBrand !== '全部' && item.brand !== selectedBrand) return false;
+            if (selectedSaler !== '全部' && item.saler !== selectedSaler) return false;
             return true;
         });
 
@@ -467,6 +486,7 @@ function Owner() {
 
         if (sortBy === 'price_asc') result.sort((a, b) => (a.items[0].price_A || 0) - (b.items[0].price_A || 0));
         else if (sortBy === 'price_desc') result.sort((a, b) => (b.items[0].price_A || 0) - (a.items[0].price_A || 0));
+        else if (sortBy === 'popularity_desc') result.sort((a, b) => (b.items[0].popularity || 0) - (a.items[0].popularity || 0));
 
         return result;
     }, [rawProducts, activeSearch, selectedParent, selectedChild, selectedBrand, sortBy]);
@@ -635,8 +655,9 @@ function Owner() {
     };
 
     // --- 渲染元件 ---
-    const renderOrderRow = (o, isCompleted = false, isPendingReview = false) => {
+ const renderOrderRow = (o, isCompleted = false, isPendingReview = false) => {
         const isEditing = editingOrder && editingOrder.id === o.id;
+        // 如果正在編輯，顯示編輯中的資料，否則顯示原始資料
         const displayOrder = isEditing ? editingOrder : o;
 
         return (
@@ -644,12 +665,43 @@ function Owner() {
                 <tr key={o.id} style={{
                     background: isCompleted ? '#f5f5f5' : (o.isPrinted ? '#f0f0f0' : 'white'),
                     opacity: isCompleted ? 0.6 : 1,
-                    color: isCompleted ? '#888' : 'inherit'
+                    color: isCompleted ? '#888' : 'inherit',
+                    borderLeft: isEditing ? '4px solid #2196f3' : 'none' // 編輯中提示
                 }}>
                     <td>{o.時間}</td>
-                    <td>{o.pickupDate}<br /><span style={{ fontSize: '0.8em', color: '#666' }}>{o.pickupTime || '外送'}</span></td>
+                    
+                    {/* ⭐ 可編輯的日期與方式 */}
+                    <td>
+                        {isEditing ? (
+                            <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
+                                <input 
+                                    type="date" 
+                                    value={displayOrder.pickupDate} 
+                                    onChange={e => setEditingOrder({...editingOrder, pickupDate: e.target.value})}
+                                    style={{padding:'4px'}}
+                                />
+                                <select 
+                                    value={displayOrder.pickupType} 
+                                    onChange={e => setEditingOrder({...editingOrder, pickupType: e.target.value})}
+                                    style={{padding:'4px'}}
+                                >
+                                    <option value="self">自取</option>
+                                    <option value="delivery">送貨</option>
+                                </select>
+                            </div>
+                        ) : (
+                            <>
+                                {o.pickupDate}<br />
+                                <span style={{ fontSize: '0.8em', color: '#666' }}>
+                                    {o.pickupType === 'delivery' ? '🚚 送貨' : '🏠 自取'} {o.pickupTime}
+                                </span>
+                            </>
+                        )}
+                    </td>
+
                     <td>{o.storeName}</td>
 
+                    {/* 金額與確認按鈕邏輯保持不變 */}
                     {isPendingReview ? (
                         <td>
                             {o.pickupType === 'delivery' ? (
@@ -665,19 +717,52 @@ function Owner() {
                         <td className="text-price" style={{ color: isCompleted ? '#999' : '#e53935' }}>${o.total}</td>
                     )}
 
+                    {/* ⭐ 可編輯的列印狀態 */}
                     <td>
-                        {isPendingReview ? '待審核' : (isCompleted ? '✅ 已完成' : (o.isPrinted ? '已列印' : '未列印'))}
-                    </td>
-                    <td>
-                        {!isPendingReview && (
-                            <button className="btn-detail" onClick={() => printOrder(o.id)}>🖨</button>
+                        {isEditing ? (
+                            <label style={{cursor:'pointer', display:'flex', alignItems:'center'}}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={displayOrder.isPrinted} 
+                                    onChange={e => setEditingOrder({...editingOrder, isPrinted: e.target.checked})}
+                                    style={{marginRight:'5px'}}
+                                />
+                                已列印
+                            </label>
+                        ) : (
+                            isPendingReview ? '待審核' : (isCompleted ? '✅ 已完成' : (o.isPrinted ? '已列印' : '未列印'))
                         )}
+                    </td>
+
+                    {/* 操作按鈕區 */}
+                    <td>
+                        {!isPendingReview && !isEditing && (
+                            <button className="btn-detail" onClick={() => printOrder(o.id)} title="列印工單">🖨</button>
+                        )}
+                        
+                        {/* 展開/收合明細 */}
                         <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
-                        {!isCompleted && !isPendingReview && (
+                        
+                        {/* 完成按鈕 (非編輯狀態才顯示) */}
+                        {!isCompleted && !isPendingReview && !isEditing && (
                             <button className="btn-detail" style={{ background: '#43a047', color: 'white' }} onClick={() => completeOrder(o.id)}>完成</button>
+                        )}
+
+                        {/* ⭐ 新增：編輯/儲存 按鈕切換 */}
+                        {!isPendingReview && !isCompleted && (
+                            isEditing ? (
+                                <div style={{marginTop:'5px', display:'flex', gap:'5px'}}>
+                                    <button className="btn-detail" style={{background:'#2196f3', color:'white'}} onClick={saveOrderEdit}>儲存</button>
+                                    <button className="btn-detail" style={{background:'#757575', color:'white'}} onClick={() => setEditingOrder(null)}>取消</button>
+                                </div>
+                            ) : (
+                                <button className="btn-detail" style={{ marginLeft:'5px', background: '#ffa000', color: 'white' }} onClick={() => startEditOrder(o)}>編輯</button>
+                            )
                         )}
                     </td>
                 </tr>
+
+                {/* 下拉明細區塊 (保持不變，但移除重複的編輯按鈕) */}
                 {expandedOrderId === o.id && (
                     <tr style={{ background: '#fafafa' }}>
                         <td colSpan="6" style={{ padding: '10px 20px' }}>
@@ -685,16 +770,8 @@ function Owner() {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                                     <h4>商品明細：</h4>
                                     <div>
-                                        {!isEditing ? (
-                                            <>
-                                                <button className="btn-detail" style={{ background: '#2196f3', color: 'white' }} onClick={() => startEditOrder(o)}>✏️ 編輯訂單</button>
-                                                <button className="btn-delete" onClick={() => deleteOrder(o.id)}>🗑 刪除訂單</button>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <button className="btn-detail" style={{ background: '#4caf50', color: 'white' }} onClick={saveOrderEdit}>💾 儲存</button>
-                                                <button className="btn-detail" onClick={() => setEditingOrder(null)}>❌ 取消</button>
-                                            </>
+                                        {!isEditing && (
+                                            <button className="btn-delete" onClick={() => deleteOrder(o.id)}>🗑 刪除訂單</button>
                                         )}
                                     </div>
                                 </div>
@@ -736,7 +813,7 @@ function Owner() {
             </>
         );
     };
-
+    
     if (!isLoggedIn) {
         return (
             <div className="admin-login-wrapper">
@@ -757,7 +834,7 @@ function Owner() {
             {/* ⭐ Hamburger Button */}
             <button className="hamburger-btn" onClick={() => setIsMenuOpen(true)}>☰</button>
             <div className={`sidebar-overlay ${isMenuOpen ? "active" : ""}`} onClick={() => setIsMenuOpen(false)}></div>
-            
+
             <nav className={`admin-sidebar ${isMenuOpen ? "open" : ""}`}>
                 <div className="sidebar-brand"><h3>管理後台</h3><button className="close-sidebar" onClick={() => setIsMenuOpen(false)}>×</button></div>
                 <div className="nav-menu">
@@ -899,10 +976,16 @@ function Owner() {
                                 <option value="全部">所有品牌</option>
                                 {brands.map(b => (<option key={b} value={b}>{b}</option>))}
                             </select>
+                            <select value={selectedSaler} onChange={(e) => setSelectedSaler(e.target.value)}>
+                                <option value="全部">所有進貨人</option>
+                                {uniqueSalers.map(s => (<option key={s} value={s}>{s}</option>))}
+                            </select>
+
                             <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                                 <option value="default">預設排序</option>
                                 <option value="price_asc">價格由低到高</option>
                                 <option value="price_desc">價格由高到低</option>
+                                <option value="popularity_desc">依熱門排序</option>
                             </select>
                         </div>
                         <div className="product-grid">
@@ -1107,7 +1190,7 @@ function Owner() {
                                         <input
                                             value={newBundle.image}
                                             onChange={e => setNewBundle({ ...newBundle, image: e.target.value })}
-                                            style={{ flex: 1, padding: '8px' , borderRadius: '4px', border: '1px solid rgb(204, 204, 204)'}}
+                                            style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }}
                                             placeholder="輸入檔名或上傳"
                                         />
                                         {/* ⭐ 新增套組上傳按鈕 */}
@@ -1122,7 +1205,7 @@ function Owner() {
                                         </label>
                                     </div>
                                 </div>
-                                                            </div>
+                            </div>
                             <div style={{ marginBottom: '15px' }}>
                                 <label style={{ marginRight: '10px' }}>模式：</label>
                                 <label style={{ marginRight: '15px' }}><input type="radio" checked={newBundle.filterType === 'manual'} onChange={() => setNewBundle({ ...newBundle, filterType: 'manual' })} /> 手動選品</label>

@@ -172,7 +172,8 @@ const ProductList = () => {
         });
 
         if (sortBy === 'price_asc') filtered.sort((a, b) => a.price_A - b.price_A);
-        if (sortBy === 'price_desc') filtered.sort((a, b) => b.price_A - a.price_A);
+        else if (sortBy === 'price_desc') filtered.sort((a, b) => b.price_A - a.price_A);
+        else if (sortBy === 'popularity_desc') filtered.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
 
         const groups = {};
         filtered.forEach(item => {
@@ -292,6 +293,7 @@ const ProductList = () => {
                         <option value="default">預設排序</option>
                         <option value="price_asc">價格由低到高</option>
                         <option value="price_desc">價格由高到低</option>
+                        <option value="popularity_desc">依熱門排序</option>
                     </select>
                 </div>
             </header>
