@@ -40,6 +40,7 @@ function HistoryPage() {
             });
             await Promise.all(promises);
             alert("商品已成功加入購物車！");
+            navigate('/shopCart');
         } catch (error) {
             alert("加入失敗，請稍後再試");
         }

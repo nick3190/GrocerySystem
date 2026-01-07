@@ -211,38 +211,22 @@ app.get("/products", async (req, res) => {
     }
 });
 app.put("/products/:id", async (req, res) => {
+    const { id } = req.params;
     const {
-        id
-    } = req.params;
-    const {
-        name,
-        price_A,
-        price_B,
-        spec,
-        unit,
-        brand,
-        image,
-        flavor,
-        rec_price,
-        standard_cost,
-        saler,
-        alias,
-        main_category,
-        sub_category
+        name, price_A, price_B, spec, unit, brand, image, flavor,
+        rec_price, standard_cost, profit, saler, alias, main_category, sub_category
     } = req.body;
     try {
+        // 確保 profit 有被放入
         await pool.query(`UPDATE products SET 
                 name=$1, "price_A"=$2, "price_B"=$3, spec=$4, unit=$5, brand=$6, image=$7,
-                flavor=$8, rec_price=$9, standard_cost=$10, saler=$11, alias=$12, main_category=$13, sub_category=$14
-             WHERE id=$15`, [name, price_A, price_B, spec, unit, brand, image, flavor, rec_price, standard_cost, saler, alias, main_category, sub_category, id]);
-        res.json({
-            message: "更新成功"
-        });
+                flavor=$8, rec_price=$9, standard_cost=$10, profit=$11, saler=$12, alias=$13, main_category=$14, sub_category=$15
+             WHERE id=$16`,
+            [name, price_A, price_B, spec, unit, brand, image, flavor, rec_price, standard_cost, profit || 0, saler, alias, main_category, sub_category, id]);
+        res.json({ message: "更新成功" });
     } catch (err) {
         console.error(err);
-        res.status(500).json({
-            message: "Error"
-        });
+        res.status(500).json({ message: "Error" });
     }
 });
 // ⭐ 批量套用利潤設定
@@ -599,15 +583,31 @@ app.get("/cart", requireAuth, async (req, res) => {
     try {
         const tier = req.user.priceTier || 'A';
         const priceCol = tier === 'B' ? 'price_B' : 'price_A';
-        const sql = `SELECT c.id, c.product_id, c.quantity, c.note, p.name, p.spec, p.flavor, p.unit, p.brand, p.image, p."${priceCol}" as price FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1 ORDER BY c.created_at DESC`;
+        // ⭐ 修改：多抓 image 和 standard_cost
+        const sql = `SELECT c.id, c.product_id, c.quantity, c.note, p.name, p.spec, p.flavor, p.unit, p.brand, p.image, p."${priceCol}" as price, p.standard_cost 
+                     FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
+                     WHERE c.user_uuid = $1 ORDER BY c.created_at DESC`;
         const result = await pool.query(sql, [req.user.uuid]);
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({
-            message: "Error"
-        });
+        res.status(500).json({ message: "Error" });
     }
 });
+
+app.put("/cart/:id", requireAuth, async (req, res) => {
+    const { quantity } = req.body;
+    try {
+        if (quantity <= 0) {
+            await pool.query('DELETE FROM cart_items WHERE id = $1 AND user_uuid = $2', [req.params.id, req.user.uuid]);
+        } else {
+            await pool.query('UPDATE cart_items SET quantity = $1 WHERE id = $2 AND user_uuid = $3', [quantity, req.params.id, req.user.uuid]);
+        }
+        res.json({ message: "Updated" });
+    } catch (err) {
+        res.status(500).json({ message: "Error" });
+    }
+});
+
 app.post("/cart", requireAuth, async (req, res) => {
     const {
         productId,
@@ -664,13 +664,7 @@ app.delete("/cart/:id", requireAuth, async (req, res) => {
     }
 });
 app.post("/api/checkout", requireAuth, async (req, res) => {
-    const {
-        orderNote,
-        deliveryType,
-        address,
-        pickupDate,
-        pickupTime
-    } = req.body;
+    const { orderNote, deliveryType, address, pickupDate, pickupTime } = req.body;
     try {
         const userRes = await pool.query("SELECT * FROM users WHERE uuid = $1", [req.user.uuid]);
         const dbUser = userRes.rows[0];
@@ -680,38 +674,35 @@ app.post("/api/checkout", requireAuth, async (req, res) => {
         if (!finalPickupDate) finalPickupDate = null;
         let finalPickupTime = pickupTime || dbUser.pickup_time;
         if (!finalPickupTime) finalPickupTime = null;
-        const cartRes = await pool.query(`
-            SELECT c.*, p.name, p."price_A", p."price_B", p.image, p.flavor, p.standard_cost 
-            FROM cart_items c 
-            JOIN products p ON CAST(c.product_id AS INTEGER) = p.id 
-            WHERE c.user_uuid = $1
-        `, [req.user.uuid]);
+
+        // ⭐ 這裡多抓 standard_cost
+        const cartRes = await pool.query(`SELECT c.*, p.name, p."price_A", p."price_B", p.image, p.flavor, p.standard_cost FROM cart_items c JOIN products p ON CAST(c.product_id AS INTEGER) = p.id WHERE c.user_uuid = $1`, [req.user.uuid]);
+
         if (cartRes.rows.length === 0) return res.status(400).json({ message: "Empty" });
 
         const isB = dbUser.price_tier === 'B';
         const total = cartRes.rows.reduce((sum, item) => sum + (Number(isB ? item.price_B : item.price_A) * item.quantity), 0);
+
         const itemsJson = cartRes.rows.map(item => ({
             id: item.product_id,
             name: item.name,
             qty: item.quantity,
             note: item.note,
             price: isB ? item.price_B : item.price_A,
-            cost: item.standard_cost || 0, // 紀錄成本
+            cost: item.standard_cost || 0, // ⭐ 紀錄成本到訂單 JSON
             image: item.image,
             flavor: item.flavor
         }));
+
         const newOrderId = generateOrderId();
-        await pool.query(`INSERT INTO orders (order_id, user_uuid, receiver_name, receiver_phone, address, pickup_type, pickup_date, pickup_time, items, total_amount, order_note, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_review', NOW())`, [newOrderId, req.user.uuid, dbUser.store_name, dbUser.phone, finalAddress, finalDeliveryType, finalPickupDate, finalPickupTime, JSON.stringify(itemsJson), total, orderNote]);
+        await pool.query(`INSERT INTO orders (order_id, user_uuid, receiver_name, receiver_phone, address, pickup_type, pickup_date, pickup_time, items, total_amount, order_note, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending_review', NOW())`,
+            [newOrderId, req.user.uuid, dbUser.store_name, dbUser.phone, finalAddress, finalDeliveryType, finalPickupDate, finalPickupTime, JSON.stringify(itemsJson), total, orderNote]);
+
         await pool.query("DELETE FROM cart_items WHERE user_uuid = $1", [req.user.uuid]);
-        res.json({
-            message: "Order Sent",
-            orderId: newOrderId
-        });
+        res.json({ message: "Order Sent", orderId: newOrderId });
     } catch (err) {
         console.error("Checkout Error:", err);
-        res.status(500).json({
-            message: "Error"
-        });
+        res.status(500).json({ message: "Error" });
     }
 });
 app.get("/history", async (req, res) => {
@@ -930,16 +921,16 @@ app.post("/api/admin/login", (req, res) => {
 });
 
 app.post("/products", async (req, res) => {
-    const { name, price_A, price_B, spec, unit, brand, image, flavor, rec_price, standard_cost, saler, alias, main_category, sub_category } = req.body;
+    const { name, price_A, price_B, spec, unit, brand, image, flavor, rec_price, standard_cost, profit, saler, alias, main_category, sub_category } = req.body;
     try {
-        const result = await pool.query(
+        await pool.query(
             `INSERT INTO products 
-            (name, "price_A", "price_B", spec, unit, brand, image, flavor, rec_price, standard_cost, saler, alias, main_category, sub_category)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            (name, "price_A", "price_B", spec, unit, brand, image, flavor, rec_price, standard_cost, profit, saler, alias, main_category, sub_category)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING *`,
-            [name, price_A || 0, price_B || 0, spec || '', unit || '', brand || '', image || '', flavor || '', rec_price || 0, standard_cost || 0, saler || '', alias || '', main_category || '', sub_category || '']
+            [name, price_A || 0, price_B || 0, spec || '', unit || '', brand || '', image || '', flavor || '', rec_price || 0, standard_cost || 0, profit || 0, saler || '', alias || '', main_category || '', sub_category || '']
         );
-        res.json({ message: "新增成功", product: result.rows[0] });
+        res.json({ message: "新增成功" });
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: "新增失敗" });
@@ -973,6 +964,15 @@ app.post("/api/upload", upload.single('file'), (req, res) => {
     }
     // 回傳檔名給前端
     res.json({ filename: req.file.filename });
+});
+
+app.put("/api/orders/:id/print-status", async (req, res) => {
+    try {
+        await pool.query("UPDATE orders SET is_printed = TRUE WHERE order_id = $1", [req.params.id]);
+        res.json({ message: "Updated" });
+    } catch (e) {
+        res.status(500).json({ message: "Error" });
+    }
 });
 
 app.use((req, res, next) => {

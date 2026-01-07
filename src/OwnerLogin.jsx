@@ -32,6 +32,9 @@ function Owner() {
     const [editingOrderDate, setEditingOrderDate] = useState('');
     const [orderSearchInput, setOrderSearchInput] = useState('');
     const [activeOrderSearch, setActiveOrderSearch] = useState('');
+    const [completedSearchInput, setCompletedSearchInput] = useState('');
+    const [activeCompletedSearch, setActiveCompletedSearch] = useState('');
+    const [completedFilterType, setCompletedFilterType] = useState('all');
 
     // 分頁 State (不會因切換 Tab 重置)
     const [pendingPage, setPendingPage] = useState(1);
@@ -413,24 +416,23 @@ function Owner() {
     };
 
     const { stats, chartData } = useMemo(() => {
-        // 1. 篩選日期範圍
         const now = moment();
         const rangeDate = moment().subtract(Number(dashboardRange), 'days');
 
-        // 過濾出範圍內的有效訂單 (不含取消/待審，視需求而定，這裡取已完成+進行中)
+        // 過濾有效訂單
         const validOrders = orders.filter(o =>
             o.status !== 'pending_review' &&
             moment(o.rawTime).isAfter(rangeDate)
         );
 
-        // 2. 統計數據
         let totalRevenue = 0;
         let totalCost = 0;
-        const dateMap = {}; // { 'MM/DD': { revenue: 0, cost: 0, profit: 0 } }
+        const dateMap = {};
         const productSalesMap = {};
-        const categoryMap = {}; // { '分類名': 數量 }
+        const categoryMap = {}; // 分類圓餅圖用
+        let selfCount = 0, deliveryCount = 0; // 自取/送貨圓餅圖用
 
-        // 初始化日期 Map (確保圖表 X 軸連續)
+        // 初始化日期 Map
         for (let i = Number(dashboardRange) - 1; i >= 0; i--) {
             const d = moment().subtract(i, 'days').format('MM/DD');
             dateMap[d] = { revenue: 0, cost: 0, profit: 0 };
@@ -438,33 +440,47 @@ function Owner() {
 
         validOrders.forEach(o => {
             const d = moment(o.rawTime).format('MM/DD');
+
+            // 計算自取/送貨
+            if (o.pickupType === 'self') selfCount++; else deliveryCount++;
+
             if (dateMap[d]) {
                 const revenue = Number(o.total || 0);
-                // 計算該訂單總成本 (若舊訂單無 cost 則為 0)
-                const cost = o.products ? o.products.reduce((acc, p) => acc + (Number(p.cost || 0) * Number(p.qty || 0)), 0) : 0;
+                let orderCost = 0;
+
+                if (o.products) {
+                    o.products.forEach(p => {
+                        // ⭐ 成本計算：優先用訂單內的 cost，沒有的話去 rawProducts 查 standard_cost
+                        let unitCost = Number(p.cost || 0);
+                        if (unitCost === 0 && rawProducts.length > 0) {
+                            const found = rawProducts.find(r => r.id == p.id || r.name === p.name); // 寬鬆匹配
+                            if (found) unitCost = Number(found.standard_cost || 0);
+                        }
+                        orderCost += unitCost * Number(p.qty || 0);
+
+                        // ⭐ 分類統計
+                        let catName = '其他';
+                        const foundProd = rawProducts.find(r => r.id == p.id || r.name === p.name);
+                        if (foundProd) {
+                            catName = categoryChartMode === 'main' ? (foundProd.main_category || '其他') : (foundProd.sub_category || '其他');
+                        }
+                        categoryMap[catName] = (categoryMap[catName] || 0) + Number(p.qty);
+
+                        // 熱銷商品
+                        productSalesMap[p.name] = (productSalesMap[p.name] || 0) + Number(p.qty);
+                    });
+                }
 
                 dateMap[d].revenue += revenue;
-                dateMap[d].cost += cost;
-                dateMap[d].profit += (revenue - cost);
+                dateMap[d].cost += orderCost;
+                dateMap[d].profit += (revenue - orderCost);
 
                 totalRevenue += revenue;
-                totalCost += cost;
-            }
-
-            // 統計分類與商品 (這裡不分日期，統計區間總量)
-            if (o.products) {
-                o.products.forEach(p => {
-                    // 找出該商品的分類資訊 (需從 rawProducts 對照)
-                    const productInfo = rawProducts.find(rp => rp.id === p.id) || {};
-                    const catKey = categoryChartMode === 'main' ? (productInfo.main_category || '其他') : (productInfo.sub_category || '其他');
-
-                    categoryMap[catKey] = (categoryMap[catKey] || 0) + Number(p.qty);
-                    productSalesMap[p.name] = (productSalesMap[p.name] || 0) + Number(p.qty);
-                });
+                totalCost += orderCost;
             }
         });
 
-        // 3. 轉換圖表格式
+        // 轉換圖表資料
         const lineChartData = Object.keys(dateMap).map(date => ({
             date,
             revenue: dateMap[date].revenue,
@@ -473,15 +489,17 @@ function Owner() {
         }));
 
         const barChartData = Object.entries(productSalesMap)
-            .map(([name, qty]) => ({ name, qty }))
-            .sort((a, b) => b.qty - a.qty)
-            .slice(0, 5);
+            .map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 5);
 
-        const pieChartData = Object.entries(categoryMap)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a, b) => b.value - a.value);
+        const categoryPieData = Object.entries(categoryMap)
+            .map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
 
-        // 訂單狀態統計 (今日/本月) - 這是 Dashboard 頂部卡片用的，邏輯維持全量統計
+        const typePieData = [
+            { name: '自取', value: selfCount },
+            { name: '送貨', value: deliveryCount }
+        ].filter(d => d.value > 0);
+
+        // 頂部卡片數據
         const todayStr = moment().format('YYYY-MM-DD');
         const currentMonth = moment().format('YYYY-MM');
         let pendingCount = 0, todayCompleted = 0, monthCompleted = 0;
@@ -495,7 +513,7 @@ function Owner() {
 
         return {
             stats: { pendingCount, todayCompleted, monthCompleted, totalRevenue, totalProfit: totalRevenue - totalCost },
-            chartData: { lineChartData, barChartData, pieChartData }
+            chartData: { lineChartData, barChartData, categoryPieData, typePieData }
         };
     }, [orders, rawProducts, dashboardRange, categoryChartMode]);
 
@@ -696,14 +714,27 @@ function Owner() {
         setIsPrintPreviewOpen(true);
     };
 
-    // 執行列印 (瀏覽器原生)
-    const handleBrowserPrint = () => {
+    // 執行列印 (修正版：詢問後才更新狀態)
+    const handleBrowserPrint = async () => {
         window.print();
-        // 列印後視同已列印，更新狀態 (選擇性)
-        if (previewOrder && !previewOrder.isPrinted) {
-            // 您可以呼叫 API 更新 isPrinted 狀態，這裡僅示範 UI 更新
-            setOrders(prev => prev.map(o => o.id === previewOrder.id ? { ...o, isPrinted: true } : o));
-        }
+
+        // 給一點延遲讓列印視窗出來
+        setTimeout(async () => {
+            if (previewOrder && !previewOrder.isPrinted) {
+                if (window.confirm("請問列印是否成功？(點擊「確定」將標記為已列印)")) {
+                    try {
+                        // 呼叫後端更新 DB
+                        await api.put(`/api/orders/${previewOrder.id}/print-status`);
+
+                        // 更新本地 State
+                        setOrders(prev => prev.map(o => o.id === previewOrder.id ? { ...o, isPrinted: true } : o));
+                        if (previewOrder) setPreviewOrder(prev => ({ ...prev, isPrinted: true }));
+                    } catch (e) {
+                        alert("狀態更新失敗");
+                    }
+                }
+            }
+        }, 500);
     };
 
     // 下載 Excel (舊有功能)
@@ -797,44 +828,35 @@ function Owner() {
         // 1. 待審
         const pending = processedOrders.filter(o => o.status === 'pending_review');
 
-        // 2. 過期 (未完成 且 日期早於今天)
+        // 2. 過期
         const expired = processedOrders.filter(o => o.status !== 'completed' && o.status !== 'pending_review' && o.pickupDate < todayStr);
 
-        // 3. 已完成 (獨立出來)
-        const completed = processedOrders.filter(o => o.status === 'completed');
+        // 3. 已完成 (獨立搜尋邏輯)
+        let completed = orders.filter(o => o.status === 'completed');
+        if (activeCompletedSearch) {
+            const term = activeCompletedSearch.toLowerCase();
+            completed = completed.filter(o => {
+                const dateStr = moment(o.rawTime).format('YYYYMMDD');
+                const name = (o.storeName || '').toLowerCase();
+                return name.includes(term) || dateStr.includes(term);
+            });
+        }
+        if (completedFilterType !== 'all') {
+            completed = completed.filter(o => o.pickupType === completedFilterType);
+        }
 
-        // 4. 進行中列表 (Main List) - 排除待審、過期、已完成
-        // 也就是只剩 "未來的" 或 "今天的" 且 "未完成" 的訂單
+        // 4. 主要列表 (進行中)
         let main = processedOrders.filter(o =>
             o.status !== 'completed' &&
             o.status !== 'pending_review' &&
-            o.pickupDate >= todayStr // 排除過期
+            o.pickupDate >= todayStr
         );
+        if (orderSubTab === 'today') main = main.filter(o => o.pickupDate === todayStr);
+        else if (orderSubTab === 'future') main = main.filter(o => o.pickupDate > todayStr);
+        if (filterType !== 'all') main = main.filter(o => o.pickupType === filterType);
 
-        // Tab 篩選 (針對 Main List)
-        if (orderSubTab === 'today') {
-            main = main.filter(o => o.pickupDate === todayStr);
-        } else if (orderSubTab === 'future') {
-            main = main.filter(o => o.pickupDate > todayStr);
-        }
-        // 若是 'all' (訂單總覽)，Main List 顯示所有 "未完成" 的有效訂單
-
-        // 自取/送貨 篩選 (同時套用到 Main 和 Completed)
-        if (filterType !== 'all') {
-            main = main.filter(o => o.pickupType === filterType);
-            // 注意：這裡我們讓已完成列表也受上方篩選器影響，體驗較一致
-            // 若希望已完成不受篩選，請移除下方這行
-            // completed = completed.filter(o => o.pickupType === filterType); 
-            // 但 React const 不能重賦值，如果需要篩選 completed，要在定義時處理，這裡暫略
-        }
-
-        return {
-            pendingData: pending,
-            expiredData: expired,
-            mainData: main,
-            completedData: completed // 回傳已完成清單
-        };
-    }, [processedOrders, orderSubTab, filterType]);
+        return { pendingData: pending, expiredData: expired, mainData: main, completedData: completed };
+    }, [processedOrders, orders, orderSubTab, filterType, activeCompletedSearch, completedFilterType]);
 
     // 分頁裁切
     const getPagedData = (data, page) => {
@@ -949,11 +971,11 @@ function Owner() {
                     {/* 操作按鈕區 */}
                     <td>
                         {!isPendingReview && !isEditing && (
-                            <button className="btn-detail" onClick={() => handlePrintPreview(o)} title="列印/下載">🖨</button>
+                            <button className="btn-detail" style={{ background: '#2196f3', color: 'white' }} onClick={() => handlePrintPreview(o)} title="列印/下載">🖨</button>
                         )}
 
                         {/* 展開/收合明細 */}
-                        <button className="btn-detail" onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
+                        <button className="btn-detail" style={{ color: 'white' }} onClick={() => toggleOrder(o.id)}>{expandedOrderId === o.id ? '▲' : '▼'}</button>
 
                         {/* 完成按鈕 (非編輯狀態才顯示) */}
                         {!isCompleted && !isPendingReview && !isEditing && (
@@ -1071,65 +1093,38 @@ function Owner() {
                     <div className="dashboard-view">
                         <header className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <h2>數據看板</h2>
-                            {/* ⭐ 時間區段選擇 */}
                             <select value={dashboardRange} onChange={e => setDashboardRange(e.target.value)} style={{ padding: '5px', borderRadius: '5px' }}>
                                 <option value="7">近 7 天</option>
-                                <option value="14">近 14 天</option>
                                 <option value="30">近 30 天</option>
                                 <option value="90">近 90 天</option>
                             </select>
                         </header>
-
-                        {/* 統計卡片 */}
                         <div className="stat-grid">
-                            <div className="stat-card"><span>🚨 待處理</span><strong style={{ color: '#e53935' }}>{stats.pendingCount}</strong></div>
-                            <div className="stat-card"><span>✅ 本日完成</span><strong style={{ color: '#43a047' }}>{stats.todayCompleted}</strong></div>
                             <div className="stat-card"><span>💰 區間營收</span><strong>${stats.totalRevenue.toLocaleString()}</strong></div>
-                            <div className="stat-card"><span>📈 區間毛利</span><strong style={{ color: '#2196f3' }}>${stats.totalProfit.toLocaleString()}</strong></div>
+                            <div className="stat-card"><span>📈 區間淨利</span><strong style={{ color: '#2196f3' }}>${stats.totalProfit.toLocaleString()}</strong></div>
                         </div>
 
-                        <div className="charts-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', gap: '20px', marginTop: '30px' }}>
-
-                            {/* ⭐ 營收/支出/利潤 趨勢圖 */}
+                        <div className="charts-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginTop: '30px' }}>
+                            {/* 財務趨勢圖 */}
                             <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <h3 style={{ marginBottom: '20px', color: '#555' }}>財務趨勢</h3>
+                                <h3>財務趨勢</h3>
                                 <div style={{ width: '100%', height: 300 }}>
                                     <ResponsiveContainer>
                                         <LineChart data={chartData.lineChartData}>
-                                            <CartesianGrid strokeDasharray="3 3" />
-                                            <XAxis dataKey="date" />
-                                            <YAxis />
-                                            <Tooltip />
-                                            <Legend />
-                                            <Line type="monotone" dataKey="revenue" name="營收" stroke="#8884d8" strokeWidth={2} />
+                                            <CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" /><YAxis /><Tooltip /><Legend />
+                                            <Line type="monotone" dataKey="revenue" name="營收" stroke="#8884d8" />
                                             <Line type="monotone" dataKey="cost" name="支出" stroke="#ff8042" />
-                                            <Line type="monotone" dataKey="profit" name="淨利潤" stroke="#82ca9d" strokeWidth={2} />
+                                            <Line type="monotone" dataKey="profit" name="淨利" stroke="#82ca9d" />
                                         </LineChart>
                                     </ResponsiveContainer>
                                 </div>
                             </div>
 
-                            {/* 熱銷商品 */}
+                            {/* 分類圓餅圖 */}
                             <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <h3 style={{ marginBottom: '20px', color: '#555' }}>熱銷商品 Top 5</h3>
-                                <div style={{ width: '100%', height: 300 }}>
-                                    <ResponsiveContainer>
-                                        <BarChart data={chartData.barChartData} layout="vertical">
-                                            <CartesianGrid strokeDasharray="3 3" />
-                                            <XAxis type="number" />
-                                            <YAxis dataKey="name" type="category" width={100} />
-                                            <Tooltip />
-                                            <Bar dataKey="qty" fill="#82ca9d" name="銷量" />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
-
-                            {/* ⭐ 類別佔比圓餅圖 */}
-                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-                                    <h3 style={{ color: '#555', margin: 0 }}>類別銷售佔比</h3>
-                                    <select value={categoryChartMode} onChange={e => setCategoryChartMode(e.target.value)} style={{ padding: '2px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <h3>類別佔比</h3>
+                                    <select value={categoryChartMode} onChange={e => setCategoryChartMode(e.target.value)}>
                                         <option value="main">主分類</option>
                                         <option value="sub">子分類</option>
                                     </select>
@@ -1137,11 +1132,25 @@ function Owner() {
                                 <div style={{ width: '100%', height: 300 }}>
                                     <ResponsiveContainer>
                                         <PieChart>
-                                            <Pie data={chartData.pieChartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} fill="#8884d8" dataKey="value" nameKey="name" label>
-                                                {chartData.pieChartData.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}
+                                            <Pie data={chartData.categoryPieData} cx="50%" cy="50%" outerRadius={80} fill="#8884d8" dataKey="value" nameKey="name" label>
+                                                {chartData.categoryPieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                                             </Pie>
-                                            <Tooltip />
-                                            <Legend />
+                                            <Tooltip /><Legend />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            {/* 訂單類型圓餅圖 (補回) */}
+                            <div className="chart-card" style={{ background: 'white', padding: '20px', borderRadius: '15px' }}>
+                                <h3>訂單類型</h3>
+                                <div style={{ width: '100%', height: 300 }}>
+                                    <ResponsiveContainer>
+                                        <PieChart>
+                                            <Pie data={chartData.typePieData} cx="50%" cy="50%" outerRadius={80} fill="#82ca9d" dataKey="value" nameKey="name" label>
+                                                <Cell fill="#0088FE" /><Cell fill="#FFBB28" />
+                                            </Pie>
+                                            <Tooltip /><Legend />
                                         </PieChart>
                                     </ResponsiveContainer>
                                 </div>
@@ -1193,7 +1202,7 @@ function Owner() {
                                     placeholder="搜尋姓名或日期(20250101)..."
                                     value={orderSearchInput}
                                     onChange={e => setOrderSearchInput(e.target.value)}
-                                    style={{ padding: '8px', borderRadius: '20px', border: '1px solid #ccc' }}
+                                    style={{ padding: '8px', borderRadius: '20px', border: '1px solid #ccc', width: '250px' }}
                                 />
                                 <button className="btn-detail" onClick={handleOrderSearch}>搜尋</button>
                             </div>
@@ -1206,9 +1215,26 @@ function Owner() {
                             <PaginationControl curr={ordersPage} total={pagedMain.totalPages} setPage={setOrdersPage} />
                         </div>
 
-                        {orderSubTab === 'all' && completedData.length > 0 && (
+                        {orderSubTab === 'all' && (
                             <div className="table-container" style={{ marginTop: '30px', borderTop: '4px solid #4caf50' }}>
-                                <h4 style={{ color: '#2e7d32' }}>✅ 已完成訂單 ({completedData.length})</h4>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                    <h4 style={{ color: '#2e7d32', margin: 0 }}>✅ 已完成訂單</h4>
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        <select value={completedFilterType} onChange={e => setCompletedFilterType(e.target.value)} style={{ padding: '5px' }}>
+                                            <option value="all">全部</option>
+                                            <option value="self">自取</option>
+                                            <option value="delivery">送貨</option>
+                                        </select>
+                                        <input
+                                            placeholder="搜尋已完成..."
+                                            value={completedSearchInput}
+                                            onChange={e => setCompletedSearchInput(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && setActiveCompletedSearch(completedSearchInput)}
+                                            style={{ padding: '5px' }}
+                                        />
+                                        <button onClick={() => setActiveCompletedSearch(completedSearchInput)} className="btn-detail">搜尋</button>
+                                    </div>
+                                </div>
                                 <table className="admin-table"><tbody>
                                     {pagedCompleted.data.map(o => renderOrderRow(o, true))}
                                 </tbody></table>
@@ -1216,16 +1242,18 @@ function Owner() {
                             </div>
                         )}
                     </div>
-                )}
+                )
+                }
 
-                {activeTab === "products" && (
-                    <div className="product-page" style={{ paddingTop: '0px' }}>
-                        <header className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h2>商品管理</h2>
-                            <button className="btn-detail" onClick={handleExportAllProducts} style={{ background: '#4caf50', color: 'white' }}>匯出全商品 Excel</button>
-                        </header>
-                        {/* ⭐ 利潤設定區塊 */}
-                        {/*<div className="profit-settings">
+                {
+                    activeTab === "products" && (
+                        <div className="product-page" style={{ paddingTop: '0px' }}>
+                            <header className="content-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h2>商品管理</h2>
+                                <button className="btn-detail" onClick={handleExportAllProducts} style={{ background: '#4caf50', color: 'white' }}>匯出全商品 Excel</button>
+                            </header>
+                            {/* ⭐ 利潤設定區塊 */}
+                            {/*<div className="profit-settings">
                             <label><strong>全域利潤比例設定：</strong></label>
                             {isEditingProfit ? (
                                 <>
@@ -1242,519 +1270,529 @@ function Owner() {
                         </div>*/}
 
 
-                        <div className="filter-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                            <input
-                                placeholder="搜尋商品..."
-                                value={searchInput}
-                                onChange={e => setSearchInput(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handleProductSearch()}
-                                style={{ marginRight: '10px', padding: '8px', border: '1px solid #ccc', borderRadius: '5px' }}
-                            />
-                            <button onClick={handleProductSearch} className="filter-btn">搜尋</button>
+                            <div className="filter-section" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                                <input
+                                    placeholder="搜尋商品..."
+                                    value={searchInput}
+                                    onChange={e => setSearchInput(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && handleProductSearch()}
+                                    style={{ marginRight: '10px', padding: '8px', border: '1px solid #ccc', borderRadius: '5px' }}
+                                />
+                                <button onClick={handleProductSearch} className="filter-btn">搜尋</button>
 
-                            <select onChange={e => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
-                                <option value="全部">所有分類</option>
-                                {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                            <select value={selectedChild} onChange={(e) => setSelectedChild(e.target.value)}>
-                                <option value="全部">所有子分類</option>
-                                {selectedParent !== '全部' && categoriesMap[selectedParent]?.map(sub => (<option key={sub} value={sub}>{sub}</option>))}
-                            </select>
-                            <select value={selectedBrand} onChange={(e) => setSelectedBrand(e.target.value)}>
-                                <option value="全部">所有品牌</option>
-                                {brands.map(b => (<option key={b} value={b}>{b}</option>))}
-                            </select>
-                            <select value={selectedSaler} onChange={(e) => setSelectedSaler(e.target.value)}>
-                                <option value="全部">所有進貨人</option>
-                                {uniqueSalers.map(s => (<option key={s} value={s}>{s}</option>))}
-                            </select>
+                                <select onChange={e => { setSelectedParent(e.target.value); setSelectedChild('全部'); }}>
+                                    <option value="全部">所有分類</option>
+                                    {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <select value={selectedChild} onChange={(e) => setSelectedChild(e.target.value)}>
+                                    <option value="全部">所有子分類</option>
+                                    {selectedParent !== '全部' && categoriesMap[selectedParent]?.map(sub => (<option key={sub} value={sub}>{sub}</option>))}
+                                </select>
+                                <input list="brand-list" placeholder="品牌" value={selectedBrand === '全部' ? '' : selectedBrand} onChange={e => setSelectedBrand(e.target.value || '全部')} className="filter-input" />
+                                <datalist id="brand-list"><option value="全部" />{brands.map(b => <option key={b} value={b} />)}</datalist>
 
-                            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                                <option value="default">預設排序</option>
-                                <option value="price_asc">價格由低到高</option>
-                                <option value="price_desc">價格由高到低</option>
-                                <option value="popularity_desc">依熱門排序</option>
-                            </select>
-                        </div>
-                        <div className="product-grid">
-                            <div className="new-bundle-card" onClick={handleCreateProduct}>
-                                <div style={{ textAlign: 'center' }}>
-                                    <span style={{ fontSize: '3rem', display: 'block' }}>＋</span>
-                                    <span>建立新商品</span>
-                                </div>
+                                <input list="saler-list" placeholder="進貨人" value={selectedSaler === '全部' ? '' : selectedSaler} onChange={e => setSelectedSaler(e.target.value || '全部')} className="filter-input" />
+                                <datalist id="saler-list"><option value="全部" />{uniqueSalers.map(s => <option key={s} value={s} />)}</datalist>
+
+                                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                                    <option value="default">預設排序</option>
+                                    <option value="price_asc">價格由低到高</option>
+                                    <option value="price_desc">價格由高到低</option>
+                                    <option value="popularity_desc">依熱門排序</option>
+                                </select>
                             </div>
-                            {currentProdData.map(group => (
-                                <div key={group.name} className="product-card">
-                                    <div className="admin-product-img-wrapper">
-                                        <img
-                                            src={group.mainImg ? `/images/${group.mainImg}` : '/images/default.png'}
-                                            alt={group.name}
-                                            className="admin-product-img"
-                                            loading="lazy"
-                                            onError={handleImageError}
-                                        />
-                                    </div>
-                                    <div className="card-body">
-                                        <h3>{group.name}</h3>
-                                        <span className="brand-tag">{group.brand}</span>
-                                        <div style={{ marginTop: '10px', fontSize: '0.9rem', color: '#666' }}>{group.items.length} 種規格</div>
-                                    </div>
-                                    <button className="change-btn" onClick={() => openEditGroupModal(group)}>修改商品</button>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="pagination">
-                            <button onClick={() => setProdPage(p => p - 1)} disabled={prodPage === 1}>上一頁</button>
-                            <span>{prodPage} / {totalProdPages}</span>
-                            <button onClick={() => setProdPage(p => p + 1)} disabled={prodPage === totalProdPages}>下一頁</button>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === "users" && (
-                    <div className="users-view">
-                        <header className="content-header"><h2>使用者管理</h2></header>
-                        <div className="table-container">
-                            <table className="admin-table">
-                                <thead>
-                                    <tr>
-                                        <th>店家名稱</th>
-                                        <th>電話</th>
-                                        <th>價格等級</th>
-                                        <th>訂單數</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {users.map(u => (
-                                        <>
-                                            <tr key={u.uuid}>
-                                                <td>{u.store_name}</td>
-                                                <td>{u.phone}</td>
-                                                <td>{u.price_tier}</td>
-                                                <td>{u.order_count}</td>
-                                                <td>
-                                                    {/* ⭐ 整合：同時保留編輯與紀錄按鈕 */}
-                                                    <button className="btn-detail" onClick={() => handleEditUser(u)}>編輯</button>
-                                                    <button
-                                                        className="btn-detail"
-                                                        style={{
-                                                            background: expandedUserHistory === u.uuid ? '#666' : '#2196f3',
-                                                            color: 'white'
-                                                        }}
-                                                        onClick={() => setExpandedUserHistory(expandedUserHistory === u.uuid ? null : u.uuid)}
-                                                    >
-                                                        {expandedUserHistory === u.uuid ? '收起紀錄' : `紀錄 (${u.order_count})`}
-                                                    </button>
-                                                </td>
-                                            </tr>
-
-                                            {/* ⭐ 歷史紀錄展開區塊 (來自第一段程式碼) */}
-                                            {expandedUserHistory === u.uuid && (
-                                                <tr>
-                                                    <td colSpan="6" style={{ background: '#f1f8ff', padding: '20px' }}>
-                                                        <h4 style={{ marginBottom: '10px' }}>{u.store_name} 的歷史紀錄：</h4>
-                                                        <table style={{ width: '100%', fontSize: '0.9rem', background: 'white', borderRadius: '8px' }}>
-                                                            <thead>
-                                                                <tr style={{ background: '#eef' }}>
-                                                                    <th style={{ padding: '10px' }}>日期</th>
-                                                                    <th>金額</th>
-                                                                    <th>狀態</th>
-                                                                    <th>明細</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                {orders.filter(o => o.user_uuid === u.uuid).map(historyOrder => (
-                                                                    <>
-                                                                        <tr key={historyOrder.id} style={{ borderBottom: '1px solid #eee' }}>
-                                                                            <td style={{ padding: '10px' }}>{historyOrder.pickupDate}</td>
-                                                                            <td className="text-price">${historyOrder.total}</td>
-                                                                            <td>
-                                                                                {historyOrder.status === 'completed'
-                                                                                    ? <span style={{ color: 'green' }}>已完成</span>
-                                                                                    : <span style={{ color: 'orange' }}>處理中</span>}
-                                                                            </td>
-                                                                            <td>
-                                                                                <button
-                                                                                    className="btn-detail"
-                                                                                    onClick={() => setExpandedHistoryOrderId(
-                                                                                        expandedHistoryOrderId === historyOrder.id ? null : historyOrder.id
-                                                                                    )}
-                                                                                >
-                                                                                    {expandedHistoryOrderId === historyOrder.id ? '▲ 收起' : '▼ 展開'}
-                                                                                </button>
-                                                                            </td>
-                                                                        </tr>
-                                                                        {/* 歷史訂單的詳細商品內容 */}
-                                                                        {expandedHistoryOrderId === historyOrder.id && (
-                                                                            <tr>
-                                                                                <td colSpan="4" style={{ padding: '10px 20px', background: '#fafafa' }}>
-                                                                                    <ul style={{ margin: 0, paddingLeft: '20px', color: '#555' }}>
-                                                                                        {historyOrder.products.map((p, idx) => (
-                                                                                            <li key={idx}>
-                                                                                                {p.name} <span style={{ color: '#888' }}>x{p.qty} (${p.price})</span>
-                                                                                            </li>
-                                                                                        ))}
-                                                                                    </ul>
-                                                                                    {historyOrder.order_note && (
-                                                                                        <div style={{ marginTop: '5px', color: '#d32f2f', fontSize: '0.85rem' }}>
-                                                                                            備註: {historyOrder.order_note}
-                                                                                        </div>
-                                                                                    )}
-                                                                                </td>
-                                                                            </tr>
-                                                                        )}
-                                                                    </>
-                                                                ))}
-                                                            </tbody>
-                                                        </table>
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* ⭐ 使用者編輯 Modal (來自第二段程式碼) */}
-                        {editingUser && (
-                            <div className="modal-overlay">
-                                <div className="modal-content">
-                                    <h3>編輯使用者</h3>
-                                    <div className="input-group">
-                                        <label>店家名稱</label>
-                                        <input value={editingUser.store_name} onChange={e => setEditingUser({ ...editingUser, store_name: e.target.value })} />
-                                    </div>
-                                    <div className="input-group">
-                                        <label>電話</label>
-                                        <input value={editingUser.phone} onChange={e => setEditingUser({ ...editingUser, phone: e.target.value })} />
-                                    </div>
-                                    <div className="input-group">
-                                        <label>價格等級 (A/B)</label>
-                                        <input value={editingUser.price_tier} onChange={e => setEditingUser({ ...editingUser, price_tier: e.target.value })} />
-                                    </div>
-                                    <div className="modal-btns">
-                                        <button className="cancel-btn" onClick={() => setEditingUser(null)}>取消</button>
-                                        <button className="confirm-btn" onClick={saveUserChanges}>儲存</button>
+                            <div className="product-grid">
+                                <div className="new-bundle-card" onClick={handleCreateProduct}>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <span style={{ fontSize: '3rem', display: 'block' }}>＋</span>
+                                        <span>建立新商品</span>
                                     </div>
                                 </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-                {/* ⭐ 套組管理 (優化版) */}
-                {activeTab === "bundles" && (
-                    <div className="bundles-view">
-                        <header className="content-header"><h2>套組管理</h2></header>
-                        <div className="product-grid">
-                            <div className="new-bundle-card" onClick={openCreateBundle}>
-                                <div style={{ textAlign: 'center' }}><span style={{ fontSize: '3rem', display: 'block' }}>＋</span><span>建立新套組</span></div>
-                            </div>
-                            {bundles.map(b => (
-                                <div key={b.id} className="bundle-card" style={{ height: 'auto', cursor: 'pointer', background: 'white' }} onClick={() => openEditBundle(b)}>
-                                    <div style={{ height: '120px', overflow: 'hidden' }}><img src={b.image && b.image.startsWith('http') ? b.image : `/images/${b.image}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImageError} /></div>
-                                    <div style={{ padding: '10px' }}>
-                                        <h4>{b.title}</h4>
-                                        <p style={{ fontSize: '0.9rem', color: '#666' }}>{b.filter_type === 'manual' ? `手動 (${b.product_ids ? b.product_ids.split(',').length : 0}項)` : `條件: ${b.filter_value}`}</p>
-                                        <button className="btn-delete" style={{ width: '100%', marginTop: '10px' }} onClick={(e) => handleDeleteBundle(e, b.id)}>刪除</button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/*  套組編輯 Modal (第一層) */}
-                {isBundleModalOpen && (
-                    <div className="modal-overlay">
-                        <div className="modal-content" style={{ maxWidth: '700px' }}>
-                            <h3>{editingBundleId ? '編輯套組' : '建立新套組'}</h3>
-                            <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
-                                <div style={{ flex: 1 }}><label>名稱</label><input value={newBundle.title} onChange={e => setNewBundle({ ...newBundle, title: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }} placeholder="例如：早餐組合" /></div>
-                                <div style={{ flex: 1 }}>
-                                    <label>圖片</label>
-                                    <div style={{ display: 'flex', gap: '5px' }}>
-                                        <input
-                                            value={newBundle.image}
-                                            onChange={e => setNewBundle({ ...newBundle, image: e.target.value })}
-                                            style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }}
-                                            placeholder="輸入檔名或上傳"
-                                        />
-                                        {/* ⭐ 新增套組上傳按鈕 */}
-                                        <label className="btn-detail" style={{ cursor: 'pointer', background: '#e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
-                                            上傳
-                                            <input
-                                                type="file"
-                                                style={{ display: 'none' }}
-                                                accept="image/*"
-                                                onChange={(e) => handleFileUpload(e, setNewBundle, newBundle)}
+                                {currentProdData.map(group => (
+                                    <div key={group.name} className="product-card">
+                                        <div className="admin-product-img-wrapper">
+                                            <img
+                                                src={group.mainImg ? `/images/${group.mainImg}` : '/images/default.png'}
+                                                alt={group.name}
+                                                className="admin-product-img"
+                                                loading="lazy"
+                                                onError={handleImageError}
                                             />
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style={{ marginBottom: '15px' }}>
-                                <label style={{ marginRight: '10px' }}>模式：</label>
-                                <label style={{ marginRight: '15px' }}><input type="radio" checked={newBundle.filterType === 'manual'} onChange={() => setNewBundle({ ...newBundle, filterType: 'manual' })} /> 手動選品</label>
-                                <label style={{ marginRight: '15px' }}><input type="radio" checked={newBundle.filterType === 'category'} onChange={() => setNewBundle({ ...newBundle, filterType: 'category' })} /> 依分類</label>
-                                <label><input type="radio" checked={newBundle.filterType === 'search'} onChange={() => setNewBundle({ ...newBundle, filterType: 'search' })} /> 依關鍵字</label>
-                            </div>
-
-                            {newBundle.filterType === 'manual' ? (
-                                <div>
-                                    <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
-                                        <input
-                                            placeholder="搜尋商品..."
-                                            value={bundleProductSearch}
-                                            onChange={e => setBundleProductSearch(e.target.value)}
-                                            style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '120px' }}
-                                        />
-
-                                        {/* 主分類 */}
-                                        <select
-                                            value={manualSelectCategory}
-                                            onChange={e => {
-                                                setManualSelectCategory(e.target.value);
-                                                setManualSelectSubCategory('全部'); // 切換主分類時，重置子分類
-                                            }}
-                                            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-                                        >
-                                            <option value="全部">全部分類</option>
-                                            {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
-                                        </select>
-
-                                        {/* 子分類 (修正：依賴 manualSelectCategory) */}
-                                        <select
-                                            value={manualSelectSubCategory}
-                                            onChange={(e) => setManualSelectSubCategory(e.target.value)}
-                                            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-                                        >
-                                            <option value="全部">所有子分類</option>
-                                            {manualSelectCategory !== '全部' && categoriesMap[manualSelectCategory]?.map(sub => (
-                                                <option key={sub} value={sub}>{sub}</option>
-                                            ))}
-                                        </select>
-
-                                        {/* 品牌 */}
-                                        <select
-                                            value={manualSelectBrand}
-                                            onChange={(e) => setManualSelectBrand(e.target.value)}
-                                            style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
-                                        >
-                                            <option value="全部">所有品牌</option>
-                                            {brands.map(b => (<option key={b} value={b}>{b}</option>))}
-                                        </select>
-
-                                        {/* 只顯示已選 (這也是您之前提到的需求) */}
-                                        <label style={{ display: 'flex', alignItems: 'center', fontSize: '0.9rem', cursor: 'pointer' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={manualShowSelected}
-                                                onChange={e => setManualShowSelected(e.target.checked)}
-                                                style={{ marginRight: '5px' }}
-                                            />
-                                            只顯已選
-                                        </label>
-                                    </div>
-                                    <div className="selection-grid">
-                                        {groupedProductsForSelection.map(group => (
-                                            <div key={group.name} className={`selection-card ${group.isSelected ? 'selected' : ''}`} onClick={() => handleGroupClick(group)}>
-                                                <img src={group.mainImg ? (group.mainImg.startsWith('http') ? group.mainImg : `/images/${group.mainImg}`) : '/images/default.png'} className="selection-img" onError={handleImageError} />
-                                                <div className="selection-info"><h5>{group.name}</h5><p>{group.items.length} 規格</p></div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <p style={{ textAlign: 'right', marginTop: '5px', color: 'var(--primary)' }}>已選 {newBundle.productIds.length} 個規格</p>
-                                </div>
-                            ) : (
-                                <div><label>篩選條件</label><input value={newBundle.filterValue} onChange={e => setNewBundle({ ...newBundle, filterValue: e.target.value })} style={{ width: '100%', padding: '8px' }} /></div>
-                            )}
-                            <div className="modal-btns" style={{ marginTop: '20px' }}>
-                                <button className="cancel-btn" onClick={() => setIsBundleModalOpen(false)}>取消</button>
-                                <button className="save-btn" onClick={handleSaveBundle}>儲存</button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* ⭐ 第二層 Modal: 選擇規格 */}
-                {isVariantModalOpen && selectingProductGroup && (
-                    <div className="modal-overlay second-level" onClick={() => setIsVariantModalOpen(false)}>
-                        <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-                            <h3>選擇 {selectingProductGroup.name} 的規格</h3>
-                            <div className="product-select-list" style={{ maxHeight: '300px' }}>
-                                {selectingProductGroup.items.map(variant => (
-                                    <div key={variant.id} className="product-select-item" onClick={() => toggleVariantInBundle(variant.id)} style={{ cursor: 'pointer' }}>
-                                        <input type="checkbox" checked={newBundle.productIds.includes(variant.id)} readOnly style={{ marginRight: '10px' }} />
-                                        <div style={{ flex: 1 }}><span style={{ fontWeight: 'bold' }}>{variant.spec}</span><span style={{ color: '#e53935', float: 'right' }}>${variant.price_A}</span></div>
+                                        </div>
+                                        <div className="card-body">
+                                            <h3>{group.name}</h3>
+                                            <span className="brand-tag">{group.brand}</span>
+                                            <div style={{ marginTop: '10px', fontSize: '0.9rem', color: '#666' }}>{group.items.length} 種規格</div>
+                                        </div>
+                                        <button className="change-btn" onClick={() => openEditGroupModal(group)}>修改商品</button>
                                     </div>
                                 ))}
                             </div>
-                            <button className="change-btn" onClick={() => setIsVariantModalOpen(false)}>完成</button>
-                        </div>
-                    </div>
-                )}
-
-                {/* ⭐ 商品編輯 Modal (擴充欄位) */}
-                {isEditModalOpen && editingVariant && (
-                    <div className="modal-overlay">
-                        <div className="modal-content" style={{ maxWidth: '800px' }}>
-                            <button className="delete-product-btn" onClick={handleDeleteProduct}>
-                                🗑 刪除商品
-                            </button>
-                            <h3>修改商品</h3>
-                            <div className="specs-list" style={{ marginBottom: '15px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                                {editingGroup.map(item => (
-                                    <div key={item.id} className="variant-btn-container">
-                                        <button
-                                            className={`filter-btn ${editingVariant.id === item.id ? 'active-filter' : ''}`}
-                                            onClick={() => setEditingVariant({ ...item })}
-                                            style={{ minWidth: '60px' }}
-                                        >
-                                            {item.flavor ? `${item.flavor} - ` : ''}{item.spec}
-                                        </button>
-                                        {/* ⭐ 懸浮顯示的刪除叉叉 */}
-                                        <span
-                                            className="delete-variant-x"
-                                            onClick={(e) => handleDeleteVariant(e, item.id)}
-                                            title="刪除此規格"
-                                        >
-                                            ✕
-                                        </span>
-                                    </div>
-                                ))}
-                                {/* 預留新增按鈕功能 */}
-                                <button
-                                    className="filter-btn"
-                                    style={{ borderStyle: 'dashed', color: '#888' }}
-                                    onClick={handleAddNewVariant}
-                                >
-                                    + 新增規格
-                                </button>
-                            </div>
-                            <div className="edit-grid-form">
-                                <div className="full-width" style={{ textAlign: 'center' }}>
-                                    <img src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'} className="admin-product-img-preview" />
-                                </div>
-
-                                <div className="input-group">
-                                    <label>圖片</label>
-                                    <div style={{ display: 'flex', gap: '5px' }}>
-                                        <input
-                                            value={editingVariant.image || ''}
-                                            onChange={e => setEditingVariant({ ...editingVariant, image: e.target.value })}
-                                            placeholder="手動輸入或上傳"
-                                            style={{ flex: 1 }}
-                                        />
-                                        <label className="btn-detail" style={{ cursor: 'pointer', background: '#e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px', borderRadius: '4px' }}>
-                                            上傳
-                                            <input
-                                                type="file"
-                                                style={{ display: 'none' }}
-                                                accept="image/*"
-                                                onChange={(e) => handleFileUpload(e, setEditingVariant, editingVariant)}
-                                            />
-                                        </label>
-                                    </div>
-                                </div>
-
-                                <div className="input-group"><label>圖片檔名</label><input value={editingVariant.image || ''} onChange={e => setEditingVariant({ ...editingVariant, image: e.target.value })} /></div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }} ><label>品名</label><input value={editingVariant.name} onChange={e => setEditingVariant({ ...editingVariant, name: e.target.value })} /></div>
-                                <div className="input-group"><label>別名 (Alias)</label><input value={editingVariant.alias || ''} onChange={e => setEditingVariant({ ...editingVariant, alias: e.target.value })} /></div>
-                                <div className="input-group"><label>品牌</label><input value={editingVariant.brand || ''} onChange={e => setEditingVariant({ ...editingVariant, brand: e.target.value })} /></div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>供應商</label><input value={editingVariant.saler || ''} onChange={e => setEditingVariant({ ...editingVariant, saler: e.target.value })} /></div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>主分類</label><input value={editingVariant.main_category || ''} onChange={e => setEditingVariant({ ...editingVariant, main_category: e.target.value })} /></div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>子分類</label><input value={editingVariant.sub_category || ''} onChange={e => setEditingVariant({ ...editingVariant, sub_category: e.target.value })} /></div>
-                                <div className="input-group"><label>口味</label><input value={editingVariant.flavor || ''} onChange={e => setEditingVariant({ ...editingVariant, flavor: e.target.value })} /></div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>規格</label><input value={editingVariant.spec} onChange={e => setEditingVariant({ ...editingVariant, spec: e.target.value })} /></div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>單位</label><input value={editingVariant.unit || ''} onChange={e => setEditingVariant({ ...editingVariant, unit: e.target.value })} /></div>
-
-                                {/* 價格與利潤區塊 */}
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
-                                    <label>進貨成本 (Standard Cost)</label>
-                                    <input type="number" value={editingVariant.standard_cost || 0} onChange={e => handleCostChange(e.target.value)} />
-                                </div>
-                                <div className="input-group">
-                                    <label>建議售價 (Rec. Price)</label>
-                                    <input type="number" value={editingVariant.rec_price || 0} onChange={e => setEditingVariant({ ...editingVariant, rec_price: e.target.value })} />
-                                </div>
-                                <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>售價 A (Price A)</label><input type="number" value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} /></div>
-                                <div className="input-group"><label>售價 B (Price B)</label><input type="number" value={editingVariant.price_B || 0} onChange={e => setEditingVariant({ ...editingVariant, price_B: e.target.value })} /></div>
-                                <div className="input-group" style={{ background: '#e8f5e9', padding: '10px', borderRadius: '8px' }}>
-                                    <label>固定利潤 (Profit)</label>
-                                    <input type="number" value={editingVariant.profit || 0} onChange={e => handleProfitChange(e.target.value)} />
-                                </div>
-                            </div>
-                            {/*<button className="change-btn" style={{ marginBottom: '10px', background: '#2196f3' }} onClick={applyProfitSettings}>套用利潤公式 (Price A = Cost x {profitRatio})</button>*/}
-                            <div className="modal-btns">
-                                <button className="cancel-btn" onClick={() => setIsEditModalOpen(false)}>關閉</button>
-                                <button className="confirm-btn" onClick={saveProductChanges}>儲存</button>
+                            <div className="pagination">
+                                <button onClick={() => setProdPage(p => p - 1)} disabled={prodPage === 1}>上一頁</button>
+                                <span>{prodPage} / {totalProdPages}</span>
+                                <button onClick={() => setProdPage(p => p + 1)} disabled={prodPage === totalProdPages}>下一頁</button>
                             </div>
                         </div>
-                    </div>
-                )}
+                    )
+                }
 
-                {isPrintPreviewOpen && previewOrder && (
-                    <div className="modal-overlay">
-                        <div className="modal-content print-modal-content" style={{ maxWidth: '800px', width: '95%' }}>
-                            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                                <h3>訂單預覽</h3>
-                                <button onClick={() => setIsPrintPreviewOpen(false)} style={{ fontSize: '1.5rem', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
-                            </div>
-
-                            {/* 預覽區塊 (這塊會被印出來) */}
-                            <div className="print-preview-box" style={{ fontFamily: 'Arial, sans-serif' }}>
-                                <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '10px' }}>訂單明細</h2>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
-                                    <div><strong>訂單編號：</strong> {previewOrder.id}</div>
-                                    <div><strong>店家名稱：</strong> {previewOrder.storeName}</div>
-                                    <div><strong>取貨方式：</strong> {previewOrder.pickupType === 'delivery' ? '外送' : '自取'}</div>
-                                    <div><strong>取貨日期：</strong> {previewOrder.pickupDate} {previewOrder.pickupTime}</div>
-                                    {previewOrder.pickupType === 'delivery' && <div style={{ gridColumn: '1/-1' }}><strong>地址：</strong> {users.find(u => u.uuid === previewOrder.user_uuid)?.address}</div>}
-                                    <div style={{ gridColumn: '1/-1' }}><strong>備註：</strong> {previewOrder.order_note}</div>
-                                </div>
-
-                                <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+                {
+                    activeTab === "users" && (
+                        <div className="users-view">
+                            <header className="content-header"><h2>使用者管理</h2></header>
+                            <div className="table-container">
+                                <table className="admin-table">
                                     <thead>
-                                        <tr style={{ borderBottom: '2px solid #333' }}>
-                                            <th style={{ textAlign: 'left', padding: '8px' }}>商品</th>
-                                            <th style={{ textAlign: 'center', padding: '8px' }}>規格</th>
-                                            <th style={{ textAlign: 'center', padding: '8px' }}>數量</th>
-                                            <th style={{ textAlign: 'right', padding: '8px' }}>單價</th>
-                                            <th style={{ textAlign: 'right', padding: '8px' }}>小計</th>
+                                        <tr>
+                                            <th>店家名稱</th>
+                                            <th>電話</th>
+                                            <th>價格等級</th>
+                                            <th>訂單數</th>
+                                            <th>操作</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {previewOrder.products.map((p, idx) => (
-                                            <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
-                                                <td style={{ padding: '8px' }}>{p.name} <span style={{ fontSize: '0.8em', color: '#666' }}>{p.note ? `(${p.note})` : ''}</span></td>
-                                                <td style={{ textAlign: 'center', padding: '8px' }}>{p.spec}</td>
-                                                <td style={{ textAlign: 'center', padding: '8px' }}>x{p.qty}</td>
-                                                <td style={{ textAlign: 'right', padding: '8px' }}>${p.price}</td>
-                                                <td style={{ textAlign: 'right', padding: '8px' }}>${p.price * p.qty}</td>
-                                            </tr>
+                                        {users.map(u => (
+                                            <>
+                                                <tr key={u.uuid}>
+                                                    <td>{u.store_name}</td>
+                                                    <td>{u.phone}</td>
+                                                    <td>{u.price_tier}</td>
+                                                    <td>{u.order_count}</td>
+                                                    <td>
+                                                        {/* ⭐ 整合：同時保留編輯與紀錄按鈕 */}
+                                                        <button className="btn-detail" onClick={() => handleEditUser(u)}>編輯</button>
+                                                        <button
+                                                            className="btn-detail"
+                                                            style={{
+                                                                background: expandedUserHistory === u.uuid ? '#666' : '#2196f3',
+                                                                color: 'white'
+                                                            }}
+                                                            onClick={() => setExpandedUserHistory(expandedUserHistory === u.uuid ? null : u.uuid)}
+                                                        >
+                                                            {expandedUserHistory === u.uuid ? '收起紀錄' : `紀錄 (${u.order_count})`}
+                                                        </button>
+                                                    </td>
+                                                </tr>
+
+                                                {/* ⭐ 歷史紀錄展開區塊 (來自第一段程式碼) */}
+                                                {expandedUserHistory === u.uuid && (
+                                                    <tr>
+                                                        <td colSpan="6" style={{ background: '#f1f8ff', padding: '20px' }}>
+                                                            <h4 style={{ marginBottom: '10px' }}>{u.store_name} 的歷史紀錄：</h4>
+                                                            <table style={{ width: '100%', fontSize: '0.9rem', background: 'white', borderRadius: '8px' }}>
+                                                                <thead>
+                                                                    <tr style={{ background: '#eef' }}>
+                                                                        <th style={{ padding: '10px' }}>日期</th>
+                                                                        <th>金額</th>
+                                                                        <th>狀態</th>
+                                                                        <th>明細</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {orders.filter(o => o.user_uuid === u.uuid).map(historyOrder => (
+                                                                        <>
+                                                                            <tr key={historyOrder.id} style={{ borderBottom: '1px solid #eee' }}>
+                                                                                <td style={{ padding: '10px' }}>{historyOrder.pickupDate}</td>
+                                                                                <td className="text-price">${historyOrder.total}</td>
+                                                                                <td>
+                                                                                    {historyOrder.status === 'completed'
+                                                                                        ? <span style={{ color: 'green' }}>已完成</span>
+                                                                                        : <span style={{ color: 'orange' }}>處理中</span>}
+                                                                                </td>
+                                                                                <td>
+                                                                                    <button
+                                                                                        className="btn-detail"
+                                                                                        onClick={() => setExpandedHistoryOrderId(
+                                                                                            expandedHistoryOrderId === historyOrder.id ? null : historyOrder.id
+                                                                                        )}
+                                                                                    >
+                                                                                        {expandedHistoryOrderId === historyOrder.id ? '▲ 收起' : '▼ 展開'}
+                                                                                    </button>
+                                                                                </td>
+                                                                            </tr>
+                                                                            {/* 歷史訂單的詳細商品內容 */}
+                                                                            {expandedHistoryOrderId === historyOrder.id && (
+                                                                                <tr>
+                                                                                    <td colSpan="4" style={{ padding: '10px 20px', background: '#fafafa' }}>
+                                                                                        <ul style={{ margin: 0, paddingLeft: '20px', color: '#555' }}>
+                                                                                            {historyOrder.products.map((p, idx) => (
+                                                                                                <li key={idx}>
+                                                                                                    {p.name} <span style={{ color: '#888' }}>x{p.qty} (${p.price})</span>
+                                                                                                </li>
+                                                                                            ))}
+                                                                                        </ul>
+                                                                                        {historyOrder.order_note && (
+                                                                                            <div style={{ marginTop: '5px', color: '#d32f2f', fontSize: '0.85rem' }}>
+                                                                                                備註: {historyOrder.order_note}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </td>
+                                                                                </tr>
+                                                                            )}
+                                                                        </>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </>
                                         ))}
                                     </tbody>
-                                    <tfoot>
-                                        <tr>
-                                            <td colSpan="4" style={{ textAlign: 'right', padding: '15px 8px', fontWeight: 'bold' }}>總金額：</td>
-                                            <td style={{ textAlign: 'right', padding: '15px 8px', fontWeight: 'bold', fontSize: '1.2em' }}>${previewOrder.total}</td>
-                                        </tr>
-                                    </tfoot>
                                 </table>
                             </div>
 
-                            <div className="modal-btns no-print" style={{ marginTop: '20px' }}>
-                                <button className="change-btn" onClick={handleBrowserPrint} style={{ background: '#2196f3' }}>🖨 直接列印</button>
-                                <button className="change-btn" onClick={handleDownloadOrderExcel} style={{ background: '#4caf50' }}>📥 下載 Excel</button>
-                                <button className="cancel-btn" onClick={() => setIsPrintPreviewOpen(false)}>關閉</button>
+                            {/* ⭐ 使用者編輯 Modal (來自第二段程式碼) */}
+                            {editingUser && (
+                                <div className="modal-overlay">
+                                    <div className="modal-content">
+                                        <h3>編輯使用者</h3>
+                                        <div className="input-group">
+                                            <label>店家名稱</label>
+                                            <input value={editingUser.store_name} onChange={e => setEditingUser({ ...editingUser, store_name: e.target.value })} />
+                                        </div>
+                                        <div className="input-group">
+                                            <label>電話</label>
+                                            <input value={editingUser.phone} onChange={e => setEditingUser({ ...editingUser, phone: e.target.value })} />
+                                        </div>
+                                        <div className="input-group">
+                                            <label>價格等級 (A/B)</label>
+                                            <input value={editingUser.price_tier} onChange={e => setEditingUser({ ...editingUser, price_tier: e.target.value })} />
+                                        </div>
+                                        <div className="modal-btns">
+                                            <button className="cancel-btn" onClick={() => setEditingUser(null)}>取消</button>
+                                            <button className="confirm-btn" onClick={saveUserChanges}>儲存</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )
+                }
+                {/* ⭐ 套組管理 (優化版) */}
+                {
+                    activeTab === "bundles" && (
+                        <div className="bundles-view">
+                            <header className="content-header"><h2>套組管理</h2></header>
+                            <div className="product-grid">
+                                <div className="new-bundle-card" onClick={openCreateBundle}>
+                                    <div style={{ textAlign: 'center' }}><span style={{ fontSize: '3rem', display: 'block' }}>＋</span><span>建立新套組</span></div>
+                                </div>
+                                {bundles.map(b => (
+                                    <div key={b.id} className="bundle-card" style={{ height: 'auto', cursor: 'pointer', background: 'white' }} onClick={() => openEditBundle(b)}>
+                                        <div style={{ height: '120px', overflow: 'hidden' }}><img src={b.image && b.image.startsWith('http') ? b.image : `/images/${b.image}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={handleImageError} /></div>
+                                        <div style={{ padding: '10px' }}>
+                                            <h4>{b.title}</h4>
+                                            <p style={{ fontSize: '0.9rem', color: '#666' }}>{b.filter_type === 'manual' ? `手動 (${b.product_ids ? b.product_ids.split(',').length : 0}項)` : `條件: ${b.filter_value}`}</p>
+                                            <button className="btn-delete" style={{ width: '100%', marginTop: '10px' }} onClick={(e) => handleDeleteBundle(e, b.id)}>刪除</button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
-                    </div>
-                )}
-            </main>
-        </div>
+                    )
+                }
+
+                {/*  套組編輯 Modal (第一層) */}
+                {
+                    isBundleModalOpen && (
+                        <div className="modal-overlay">
+                            <div className="modal-content" style={{ maxWidth: '700px' }}>
+                                <h3>{editingBundleId ? '編輯套組' : '建立新套組'}</h3>
+                                <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                                    <div style={{ flex: 1 }}><label>名稱</label><input value={newBundle.title} onChange={e => setNewBundle({ ...newBundle, title: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }} placeholder="例如：早餐組合" /></div>
+                                    <div style={{ flex: 1 }}>
+                                        <label>圖片</label>
+                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                            <input
+                                                value={newBundle.image}
+                                                onChange={e => setNewBundle({ ...newBundle, image: e.target.value })}
+                                                style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid rgb(204, 204, 204)' }}
+                                                placeholder="輸入檔名或上傳"
+                                            />
+                                            {/* ⭐ 新增套組上傳按鈕 */}
+                                            <label className="btn-detail" style={{ cursor: 'pointer', background: '#e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                                                上傳
+                                                <input
+                                                    type="file"
+                                                    style={{ display: 'none' }}
+                                                    accept="image/*"
+                                                    onChange={(e) => handleFileUpload(e, setNewBundle, newBundle)}
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style={{ marginBottom: '15px' }}>
+                                    <label style={{ marginRight: '10px' }}>模式：</label>
+                                    <label style={{ marginRight: '15px' }}><input type="radio" checked={newBundle.filterType === 'manual'} onChange={() => setNewBundle({ ...newBundle, filterType: 'manual' })} /> 手動選品</label>
+                                    <label style={{ marginRight: '15px' }}><input type="radio" checked={newBundle.filterType === 'category'} onChange={() => setNewBundle({ ...newBundle, filterType: 'category' })} /> 依分類</label>
+                                    <label><input type="radio" checked={newBundle.filterType === 'search'} onChange={() => setNewBundle({ ...newBundle, filterType: 'search' })} /> 依關鍵字</label>
+                                </div>
+
+                                {newBundle.filterType === 'manual' ? (
+                                    <div>
+                                        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                                            <input
+                                                placeholder="搜尋商品..."
+                                                value={bundleProductSearch}
+                                                onChange={e => setBundleProductSearch(e.target.value)}
+                                                style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '120px' }}
+                                            />
+
+                                            {/* 主分類 */}
+                                            <select
+                                                value={manualSelectCategory}
+                                                onChange={e => {
+                                                    setManualSelectCategory(e.target.value);
+                                                    setManualSelectSubCategory('全部'); // 切換主分類時，重置子分類
+                                                }}
+                                                style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                            >
+                                                <option value="全部">全部分類</option>
+                                                {Object.keys(categoriesMap).map(c => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+
+                                            {/* 子分類 (修正：依賴 manualSelectCategory) */}
+                                            <select
+                                                value={manualSelectSubCategory}
+                                                onChange={(e) => setManualSelectSubCategory(e.target.value)}
+                                                style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                            >
+                                                <option value="全部">所有子分類</option>
+                                                {manualSelectCategory !== '全部' && categoriesMap[manualSelectCategory]?.map(sub => (
+                                                    <option key={sub} value={sub}>{sub}</option>
+                                                ))}
+                                            </select>
+
+                                            {/* 品牌 */}
+                                            <select
+                                                value={manualSelectBrand}
+                                                onChange={(e) => setManualSelectBrand(e.target.value)}
+                                                style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                                            >
+                                                <option value="全部">所有品牌</option>
+                                                {brands.map(b => (<option key={b} value={b}>{b}</option>))}
+                                            </select>
+
+                                            {/* 只顯示已選 (這也是您之前提到的需求) */}
+                                            <label style={{ display: 'flex', alignItems: 'center', fontSize: '0.9rem', cursor: 'pointer' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={manualShowSelected}
+                                                    onChange={e => setManualShowSelected(e.target.checked)}
+                                                    style={{ marginRight: '5px' }}
+                                                />
+                                                只顯已選
+                                            </label>
+                                        </div>
+                                        <div className="selection-grid">
+                                            {groupedProductsForSelection.map(group => (
+                                                <div key={group.name} className={`selection-card ${group.isSelected ? 'selected' : ''}`} onClick={() => handleGroupClick(group)}>
+                                                    <img src={group.mainImg ? (group.mainImg.startsWith('http') ? group.mainImg : `/images/${group.mainImg}`) : '/images/default.png'} className="selection-img" onError={handleImageError} />
+                                                    <div className="selection-info"><h5>{group.name}</h5><p>{group.items.length} 規格</p></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <p style={{ textAlign: 'right', marginTop: '5px', color: 'var(--primary)' }}>已選 {newBundle.productIds.length} 個規格</p>
+                                    </div>
+                                ) : (
+                                    <div><label>篩選條件</label><input value={newBundle.filterValue} onChange={e => setNewBundle({ ...newBundle, filterValue: e.target.value })} style={{ width: '100%', padding: '8px' }} /></div>
+                                )}
+                                <div className="modal-btns" style={{ marginTop: '20px' }}>
+                                    <button className="cancel-btn" onClick={() => setIsBundleModalOpen(false)}>取消</button>
+                                    <button className="save-btn" onClick={handleSaveBundle}>儲存</button>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }
+
+                {/* ⭐ 第二層 Modal: 選擇規格 */}
+                {
+                    isVariantModalOpen && selectingProductGroup && (
+                        <div className="modal-overlay second-level" onClick={() => setIsVariantModalOpen(false)}>
+                            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+                                <h3>選擇 {selectingProductGroup.name} 的規格</h3>
+                                <div className="product-select-list" style={{ maxHeight: '300px' }}>
+                                    {selectingProductGroup.items.map(variant => (
+                                        <div key={variant.id} className="product-select-item" onClick={() => toggleVariantInBundle(variant.id)} style={{ cursor: 'pointer' }}>
+                                            <input type="checkbox" checked={newBundle.productIds.includes(variant.id)} readOnly style={{ marginRight: '10px' }} />
+                                            <div style={{ flex: 1 }}><span style={{ fontWeight: 'bold' }}>{variant.spec}</span><span style={{ color: '#e53935', float: 'right' }}>${variant.price_A}</span></div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button className="change-btn" onClick={() => setIsVariantModalOpen(false)}>完成</button>
+                            </div>
+                        </div>
+                    )
+                }
+
+                {/* ⭐ 商品編輯 Modal (擴充欄位) */}
+                {
+                    isEditModalOpen && editingVariant && (
+                        <div className="modal-overlay">
+                            <div className="modal-content" style={{ maxWidth: '800px' }}>
+                                <button className="delete-product-btn" onClick={handleDeleteProduct}>
+                                    🗑 刪除商品
+                                </button>
+                                <h3>修改商品</h3>
+                                <div className="specs-list" style={{ marginBottom: '15px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                    {editingGroup.map(item => (
+                                        <div key={item.id} className="variant-btn-container">
+                                            <button
+                                                className={`filter-btn ${editingVariant.id === item.id ? 'active-filter' : ''}`}
+                                                onClick={() => setEditingVariant({ ...item })}
+                                                style={{ minWidth: '60px' }}
+                                            >
+                                                {item.flavor ? `${item.flavor} - ` : ''}{item.spec}
+                                            </button>
+                                            {/* ⭐ 懸浮顯示的刪除叉叉 */}
+                                            <span
+                                                className="delete-variant-x"
+                                                onClick={(e) => handleDeleteVariant(e, item.id)}
+                                                title="刪除此規格"
+                                            >
+                                                ✕
+                                            </span>
+                                        </div>
+                                    ))}
+                                    {/* 預留新增按鈕功能 */}
+                                    <button
+                                        className="filter-btn"
+                                        style={{ borderStyle: 'dashed', color: '#888' }}
+                                        onClick={handleAddNewVariant}
+                                    >
+                                        + 新增規格
+                                    </button>
+                                </div>
+                                <div className="edit-grid-form">
+                                    <div className="full-width" style={{ textAlign: 'center' }}>
+                                        <img src={editingVariant.image ? `/images/${editingVariant.image}` : '/images/default.png'} className="admin-product-img-preview" />
+                                    </div>
+
+                                    <div className="input-group">
+                                        <label>圖片</label>
+                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                            <input
+                                                value={editingVariant.image || ''}
+                                                onChange={e => setEditingVariant({ ...editingVariant, image: e.target.value })}
+                                                placeholder="手動輸入或上傳"
+                                                style={{ flex: 1 }}
+                                            />
+                                            <label className="btn-detail" style={{ cursor: 'pointer', background: '#e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px', borderRadius: '4px' }}>
+                                                上傳
+                                                <input
+                                                    type="file"
+                                                    style={{ display: 'none' }}
+                                                    accept="image/*"
+                                                    onChange={(e) => handleFileUpload(e, setEditingVariant, editingVariant)}
+                                                />
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div className="input-group"><label>圖片檔名</label><input value={editingVariant.image || ''} onChange={e => setEditingVariant({ ...editingVariant, image: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }} ><label>品名</label><input value={editingVariant.name} onChange={e => setEditingVariant({ ...editingVariant, name: e.target.value })} /></div>
+                                    <div className="input-group"><label>別名 (Alias)</label><input value={editingVariant.alias || ''} onChange={e => setEditingVariant({ ...editingVariant, alias: e.target.value })} /></div>
+                                    <div className="input-group"><label>品牌</label><input value={editingVariant.brand || ''} onChange={e => setEditingVariant({ ...editingVariant, brand: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>供應商</label><input value={editingVariant.saler || ''} onChange={e => setEditingVariant({ ...editingVariant, saler: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>主分類</label><input value={editingVariant.main_category || ''} onChange={e => setEditingVariant({ ...editingVariant, main_category: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>子分類</label><input value={editingVariant.sub_category || ''} onChange={e => setEditingVariant({ ...editingVariant, sub_category: e.target.value })} /></div>
+                                    <div className="input-group"><label>口味</label><input value={editingVariant.flavor || ''} onChange={e => setEditingVariant({ ...editingVariant, flavor: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>規格</label><input value={editingVariant.spec} onChange={e => setEditingVariant({ ...editingVariant, spec: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>單位</label><input value={editingVariant.unit || ''} onChange={e => setEditingVariant({ ...editingVariant, unit: e.target.value })} /></div>
+
+                                    {/* 價格與利潤區塊 */}
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
+                                        <label>進貨成本 (Standard Cost)</label>
+                                        <input type="number" value={editingVariant.standard_cost || 0} onChange={e => handleCostChange(e.target.value)} />
+                                    </div>
+                                    <div className="input-group">
+                                        <label>建議售價 (Rec. Price)</label>
+                                        <input type="number" value={editingVariant.rec_price || 0} onChange={e => setEditingVariant({ ...editingVariant, rec_price: e.target.value })} />
+                                    </div>
+                                    <div className="input-group" style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><label>售價 A (Price A)</label><input type="number" value={editingVariant.price_A} onChange={e => setEditingVariant({ ...editingVariant, price_A: e.target.value })} /></div>
+                                    <div className="input-group"><label>售價 B (Price B)</label><input type="number" value={editingVariant.price_B || 0} onChange={e => setEditingVariant({ ...editingVariant, price_B: e.target.value })} /></div>
+                                    <div className="input-group" style={{ background: '#e8f5e9', padding: '10px', borderRadius: '8px' }}>
+                                        <label>固定利潤 (Profit)</label>
+                                        <input type="number" value={editingVariant.profit || 0} onChange={e => handleProfitChange(e.target.value)} />
+                                    </div>
+                                </div>
+                                {/*<button className="change-btn" style={{ marginBottom: '10px', background: '#2196f3' }} onClick={applyProfitSettings}>套用利潤公式 (Price A = Cost x {profitRatio})</button>*/}
+                                <div className="modal-btns">
+                                    <button className="cancel-btn" onClick={() => setIsEditModalOpen(false)}>關閉</button>
+                                    <button className="confirm-btn" onClick={saveProductChanges}>儲存</button>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }
+
+                {
+                    isPrintPreviewOpen && previewOrder && (
+                        <div className="modal-overlay">
+                            <div className="modal-content print-modal-content" style={{ maxWidth: '800px', width: '95%' }}>
+                                <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                                    <h3>訂單預覽</h3>
+                                    <button onClick={() => setIsPrintPreviewOpen(false)} style={{ fontSize: '1.5rem', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+                                </div>
+
+                                {/* 預覽區塊 (這塊會被印出來) */}
+                                <div className="print-preview-box" style={{ fontFamily: 'Arial, sans-serif' }}>
+                                    <h2 style={{ textAlign: 'center', borderBottom: '2px solid #333', paddingBottom: '10px' }}>訂單明細</h2>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+                                        <div><strong>訂單編號：</strong> {previewOrder.id}</div>
+                                        <div><strong>店家名稱：</strong> {previewOrder.storeName}</div>
+                                        <div><strong>取貨方式：</strong> {previewOrder.pickupType === 'delivery' ? '外送' : '自取'}</div>
+                                        <div><strong>取貨日期：</strong> {previewOrder.pickupDate} {previewOrder.pickupTime}</div>
+                                        {previewOrder.pickupType === 'delivery' && <div style={{ gridColumn: '1/-1' }}><strong>地址：</strong> {users.find(u => u.uuid === previewOrder.user_uuid)?.address}</div>}
+                                        <div style={{ gridColumn: '1/-1' }}><strong>備註：</strong> {previewOrder.order_note}</div>
+                                    </div>
+
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+                                        <thead>
+                                            <tr style={{ borderBottom: '2px solid #333' }}>
+                                                <th style={{ textAlign: 'left', padding: '8px' }}>商品</th>
+                                                <th style={{ textAlign: 'center', padding: '8px' }}>規格</th>
+                                                <th style={{ textAlign: 'center', padding: '8px' }}>數量</th>
+                                                <th style={{ textAlign: 'right', padding: '8px' }}>單價</th>
+                                                <th style={{ textAlign: 'right', padding: '8px' }}>小計</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {previewOrder.products.map((p, idx) => (
+                                                <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                                                    <td style={{ padding: '8px' }}>{p.name} <span style={{ fontSize: '0.8em', color: '#666' }}>{p.note ? `(${p.note})` : ''}</span></td>
+                                                    <td style={{ textAlign: 'center', padding: '8px' }}>{p.spec}</td>
+                                                    <td style={{ textAlign: 'center', padding: '8px' }}>x{p.qty}</td>
+                                                    <td style={{ textAlign: 'right', padding: '8px' }}>${p.price}</td>
+                                                    <td style={{ textAlign: 'right', padding: '8px' }}>${p.price * p.qty}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr>
+                                                <td colSpan="4" style={{ textAlign: 'right', padding: '15px 8px', fontWeight: 'bold' }}>總金額：</td>
+                                                <td style={{ textAlign: 'right', padding: '15px 8px', fontWeight: 'bold', fontSize: '1.2em' }}>${previewOrder.total}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+
+                                <div className="modal-btns no-print" style={{ marginTop: '20px' }}>
+                                    <button className="change-btn" onClick={handleBrowserPrint} style={{ background: '#2196f3' }}>🖨 直接列印</button>
+                                    <button className="change-btn" onClick={handleDownloadOrderExcel} style={{ background: '#4caf50' }}>📥 下載 Excel</button>
+                                    <button className="cancel-btn" onClick={() => setIsPrintPreviewOpen(false)}>✖</button>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }
+            </main >
+        </div >
     );
 }
 
